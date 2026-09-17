@@ -1,102 +1,132 @@
-# Gco-routines — Codex Work handoff
+# gco-routines for Klipper
 
-**Draft 0.2 · 2026-09-17 · developer package, not an installable printer extra.**
-
-The goal is a separately installed Klipper extra, with no edits to tracked upstream
-files, that adds three native G-code instructions. The same small language frontend
-should be usable by a slicer or editor without running Klipper.
+`gco-routines` is an extras-only Klipper extension that adds three literal
+control instructions without changing tracked Klipper source or MCU firmware:
 
 ```gcode
 START NAME=filament_change
     T0
 END
 
-START NAME=nozzle_heating
-    M109 S220
-END
-
 CLEAN_NOZZLE
-WAIT ON=filament_change,nozzle_heating
+WAIT ON=filament_change
 ```
 
-No names are necessary when `WAIT` selects all outstanding background routines.
-Any routine may wait on another. G-code owns synchronization; Jinja only supplies
-ordinary expressions, `result`, `reply` and `waited`. Existing commands and their
-physical completion semantics remain unchanged. Shared hardware remains shared.
+The default routine continues after `END`; the child runs cooperatively on
+Klipper's reactor. `WAIT` suspends only its caller. A bare `WAIT` joins all of
+that caller's outstanding children in `START` order.
 
-## Receiving this corrected delivery
+## Current validation status
 
-Read `RECEIVING.md` for complete ZIP extraction or Git-bundle cloning. Verify the
-actual source tree with `python tools/verify_handoff.py --require-git` before
-starting. The new Git history is a local handoff baseline, not upstream Klipper.
+The implementation is validated locally against:
 
-## Start here
+- the target Pi checkout at commit
+  `c0c7ef2a5a82f1b60c207fb02274c6536bb952cb`;
+- current upstream pin
+  `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
+- the target software versions Python 3.9.2, Jinja 3.1.6, and greenlet 2.0.2
+  by syntax/API compatibility, with real `SelectReactor` integration tests
+  running locally on Python 3.12/Jinja 3.1.6/greenlet 3.3.2.
 
-Read `CODEX_HANDOFF.md`, then `AGENTS.md`. The former is the implementation task;
-the latter records constraints that must survive later agent turns. `docs/behavior-v0.1.md`
-is the original behavioral specification. `docs/language-v0.2.md` adds the formal
-language and clarifies validation/deployment without expanding the command set.
+No files were installed on the Pi and no printer commands were sent during
+development. The attempted upstream merge was performed only in a temporary
+local clone and was withheld because it conflicts with the Pi's CAN changes in
+`klippy/msgproto.py`.
+
+## Installation layout
+
+The plugin is the self-contained package in `klippy_extra/gco_routines`. The
+installer creates one untracked symlink under `klippy/extras` and never edits a
+tracked Klipper file:
 
 ```bash
-# From this directory. These commands operate offline when dependencies exist.
-python -m gcoroutines examples/toolchange.gcode --closed-world
-python -m gcoroutines examples/results.jinja --template --json
-python -m pytest -q
-python tools/demo_state.py
+python tools/install_gco_routines.py --klipper /path/to/klipper
 ```
 
-For a fresh development environment:
+Load this section before any `[gcode_macro ...]` section that uses literal
+`START`, `END`, or `WAIT`:
+
+```ini
+[gco_routines]
+```
+
+The extension deliberately fails closed if the three command names already
+exist, the Klipper dispatcher is not one of the validated baselines, or managed
+macros were loaded before the extension could retain and validate their source.
+
+Uninstall the development symlink with:
+
+```bash
+python tools/install_gco_routines.py --klipper /path/to/klipper --uninstall
+```
+
+Restarting Klipper and editing `printer.cfg` are deployment operations and are
+not performed by the installer.
+
+## Managed macros and results
+
+A macro opts into ordered, incremental Jinja execution only when it contains a
+literal control line. Legacy macros retain Klipper's render-entire-template
+behavior.
+
+```ini
+[gcode_macro PREPARE_TOOL]
+gcode:
+    START NAME=load
+        T0
+        {% set result.lane = reply.lane %}
+    END
+
+    CLEAN_NOZZLE
+    WAIT ON=load
+    M117 Loaded lane {waited[0].lane}
+```
+
+`reply` is the structured response from the current ordinary command. A driver
+can provide it from its command handler:
+
+```python
+manager = printer.lookup_object("gco_routines")
+manager.driver_api.set_reply(gcmd, {"lane": 0, "loaded_mm": 684.5})
+manager.driver_api.set_detail(gcmd, device="mmu", reason="loading")
+```
+
+`result` is a fresh per-routine namespace. Successful results are copied and
+frozen as plain data; `waited` is the ordered result sequence from the most
+recent successful `WAIT`. Missing managed fields are strict unless the existing
+Jinja `default` filter is used explicitly.
+
+## Ingress and lifecycle behavior
+
+- Complete API scripts and virtual-SD files may contain raw control blocks.
+- Virtual SD preflights the complete file through `_load_file`, covering both
+  `M23`/`M24` and `SDCARD_PRINT_FILE`, and performs an implicit join before EOF
+  can be reported as successful.
+- Generated controls from legacy macros or rendered expressions are rejected.
+- Interactive pseudo-TTY control blocks and line-number-framed controls are
+  rejected because their complete source boundary is unavailable.
+- Pause prevents new child admission. Cancel, reset, shutdown, and disconnect
+  invalidate active runs and wake suspended waits.
+- Unrelated external requests retain normal Klipper mutex serialization; only
+  routines belonging to the lock owner's run receive cooperative admission.
+
+Software completion is not proof that buffered motion has physically stopped.
+Use the existing Klipper barrier required by the underlying command (for
+example, `M400`) before `END` when physical completion matters. Concurrent
+commands still share the same printer hardware and must be synchronized by the
+author.
+
+## Development and verification
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[test]'
+python -m pytest -q
+python -m gcoroutines examples/toolchange.gcode --closed-world --json
+python -m gcoroutines examples/results.jinja --template --json
 ```
 
-The plain frontend and semantic reference use the Python standard library.
-Template syntax validation uses Jinja; grammar cross-check tests use Lark.
-Installing these development tools does **not** install a Klipper extra.
-
-## What is implemented here
-
-| Item | Status |
-|---|---|
-| EBNF plus executable Lark grammar | Included; syntax is separate from semantic checks |
-| Offline parser/validator with line/column diagnostics and JSON source AST | Implemented reference frontend |
-| Jinja syntax and literal control-boundary checks before rendering | Implemented; never calls template helpers |
-| Generated-control admission guard | Implemented reference function; not wired into Klipper |
-| Run-local names, wait graph, retained immutable results, snapshots | Executable transition reference; not a scheduler |
-| Passing tests and reproducible examples | See `evidence/verification.md` |
-| Actual Klipper dispatcher/macro/virtual-SD adapters | **Not implemented; the Codex task** |
-| Resumable ordered-Jinja compiler | **Not implemented; the Codex task** |
-| Complete/pinned Klipper checkout or hardware validation | **Not obtained in this environment** |
-
-The context-free addition is deliberately small. Ordinary G-code is an opaque host
-language terminal, not a claim that this parser validates every existing command.
-Because the initial blocks are flat, this sublanguage is even regular; a CFG is a
-precise interchange specification, not a promise of arbitrary-program verification.
-
-Syntax validation does not prove that a name exists in every branch, a device will
-finish, or shared motion is safe. Those have distinct semantic/runtime checks.
-Generated controls cannot bypass the source grammar. Jinja result types can be
-checked when schemas exist; missing live fields are still runtime errors.
-
-## Package map
-
-- `grammar/`: raw and mixed-source EBNF; executable whole-program/control grammars.
-- `gcoroutines/`: frontend, CLI, admission guard, transition reference.
-- `tests/`, `examples/`, `schemas/`: conformance checks, commented programs, snapshot contract.
-- `docs/`: language contract, behavior, implementation audit and acceptance gates.
-- `tools/`: state demo and safe upstream fetch/pin utility.
-- `evidence/`: actual test output, environment, prior probes, and failed fetch record.
-
-There is intentionally no deceptive `load_config()` stub to install on a printer.
-The prior audit excerpts are labeled transcriptions, not a downloaded checkout.
-The upstream fetch helper records a real commit SHA when run in a network-enabled
-workspace; no fabricated SHA is provided here.
-
-## Handoff
-
-Attach this directory/archive to the Codex workspace and use `CODEX_PROMPT.md` as
-the task text. No Codex task was submitted from this conversation: direct Codex
-Work submission was not exposed by the available connectors.
+The reference parser remains in `gcoroutines/`; the deployable extra does not
+depend on that package. Detailed pins and implementation evidence are in
+`evidence/` and `IMPLEMENTATION_REPORT.md`.
