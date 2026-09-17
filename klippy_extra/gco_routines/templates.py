@@ -147,6 +147,12 @@ class LiveReplyProxy:
         self._getter = getter
         self._undefined = undefined or jinja2.StrictUndefined
 
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            raise AttributeError("reply is read-only")
+
     def _missing(self, key: Any):
         return self._undefined(name="reply.%s" % key, hint="reply field is missing")
 
@@ -177,6 +183,12 @@ class LiveWaitedProxy:
     def __init__(self, getter: Callable[[], Sequence[Any]], undefined=None):
         self._getter = getter
         self._undefined = undefined or jinja2.StrictUndefined
+
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            raise AttributeError("waited is read-only")
 
     def _missing(self, index):
         return self._undefined(name="waited[%s]" % index, hint="waited result is missing")
@@ -366,7 +378,29 @@ def _namespace_data(namespace) -> Dict[str, Any]:
     attrs = getattr(namespace, "_Namespace__attrs", None)
     if attrs is None:
         attrs = getattr(namespace, "_attrs", {})
-    return {key: _snapshot_plain(value) for key, value in dict(attrs).items()}
+    return {key: _freeze_result(value) for key, value in dict(attrs).items()}
+
+
+def _freeze_result(value, depth=0):
+    """Detach result data and reject Undefined/host objects at completion."""
+
+    if isinstance(value, jinja2.Undefined):
+        raise OrderedTemplateError("Managed result contains an undefined field")
+    if depth > 32:
+        raise OrderedTemplateError("Managed result is too deeply nested")
+    if value is None or type(value) in (bool, int, str):
+        return value
+    if type(value) is float:
+        if value != value or value in (float("inf"), float("-inf")):
+            raise OrderedTemplateError("Managed result contains a non-finite number")
+        return value
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_result(item, depth + 1) for item in value)
+    if isinstance(value, dict):
+        if any(type(key) is not str for key in value):
+            raise OrderedTemplateError("Managed result map keys must be strings")
+        return {key: _freeze_result(item, depth + 1) for key, item in value.items()}
+    raise OrderedTemplateError("Managed result contains unsupported %s" % type(value).__name__)
 
 
 @dataclass
@@ -395,7 +429,12 @@ class OrderedTemplate:
 
         values = dict(context or {})
         values.update(kwargs)
-        return self.template.render(values)
+        # Even the adapter compatibility path must consume the generator
+        # incrementally; ``Template.render`` would buffer all output and can
+        # evaluate a post-WAIT expression before the wait callback runs.
+        for _ in self.template.generate(values):
+            pass
+        return ""
 
     def generate(self, context=None, **kwargs):
         values = dict(context or {})
