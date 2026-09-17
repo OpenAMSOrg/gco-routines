@@ -19,10 +19,11 @@ def oams(klippy_env):
     status = {
         'oams_manager': {'current_group': 'T0'},
         'toolhead': {'homed_axes': 'xyz'},
-        'extruder': {'can_extrude': True},
+        'extruder': {'can_extrude': True, 'temperature': 220.0},
         'pause_resume': {'is_paused': False},
         'exclude_object': {'current_object': '', 'excluded_objects': []},
-        'configfile': {'settings': {'filament_group T%d' % i: {} for i in range(4)}},
+        # Real ConfigFile.get_status() normalizes section keys to lowercase.
+        'configfile': {'settings': {'filament_group t%d' % i: {} for i in range(4)}},
         'filament_switch_sensor extruder_in': {'filament_detected': True},
         'filament_switch_sensor extruder_out': {'filament_detected': False},
     }
@@ -113,6 +114,14 @@ def test_invalid_or_nested_toolchange_fails_before_hardware(oams, source):
 
 
 def test_cold_toolchange_has_no_motion(oams):
-    oams.status['extruder']['can_extrude'] = False
+    # This printer config sets min_extrude_temp to 10 C, so Klipper reports
+    # can_extrude at room temperature.  The macro must retain its own guard.
+    oams.status['extruder']['temperature'] = 23.0
     assert execute(oams.env, 'T1')
+    assert oams.events == []
+
+
+def test_cold_standalone_unload_has_no_motion(oams):
+    oams.status['extruder']['temperature'] = 23.0
+    assert execute(oams.env, 'SAFE_UNLOAD_FILAMENT')
     assert oams.events == []

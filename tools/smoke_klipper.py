@@ -49,10 +49,10 @@ def main():
     statuses = {
         'oams_manager': {'current_group': 'T0'},
         'toolhead': {'homed_axes': 'xyz'},
-        'extruder': {'can_extrude': True},
+        'extruder': {'can_extrude': True, 'temperature': 220.0},
         'pause_resume': {'is_paused': False},
         'exclude_object': {'current_object': '', 'excluded_objects': []},
-        'configfile': {'settings': {'filament_group T%d' % i: {} for i in range(4)}},
+        'configfile': {'settings': {'filament_group t%d' % i: {} for i in range(4)}},
         'filament_switch_sensor extruder_in': {'filament_detected': True},
         'filament_switch_sensor extruder_out': {'filament_detected': False},
     }
