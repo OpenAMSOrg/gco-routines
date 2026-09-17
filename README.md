@@ -5,7 +5,7 @@ control instructions without changing tracked Klipper source or MCU firmware:
 
 ```gcode
 START NAME=filament_change
-    T0
+    OAMSM_LOAD_FILAMENT GROUP=T0
 END
 
 CLEAN_NOZZLE
@@ -24,14 +24,20 @@ The implementation is validated locally against:
   `c0c7ef2a5a82f1b60c207fb02274c6536bb952cb`;
 - current upstream pin
   `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
-- the target software versions Python 3.9.2, Jinja 3.1.6, and greenlet 2.0.2
-  by syntax/API compatibility, with real `SelectReactor` integration tests
-  running locally on Python 3.12/Jinja 3.1.6/greenlet 3.3.2.
+- real `SelectReactor` integration tests running locally on
+  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **242 tests passed**;
+- the Pi's actual Python 3.9.2/Jinja 3.1.6/greenlet 2.0.2 environment,
+  using real Klippy and the OAMS macro file with inert hardware handlers.
 
-No files were installed on the Pi and no printer commands were sent during
-development. The attempted upstream merge was performed only in a temporary
-local clone and was withheld because it conflicts with the Pi's CAN changes in
-`klippy/msgproto.py`.
+The extra and single-FPS macros are installed on the Pi following explicit
+deployment authorization. Live hardware validation is blocked by the existing
+`mcu 'oams_mcu1': Unable to connect` error; no motion, heating, or filament
+operations were requested during review. The attempted upstream merge was
+performed only in a temporary local clone and was withheld because it conflicts
+with the Pi's CAN changes in `klippy/msgproto.py`.
+
+Review findings, verification, and rollback locations are recorded in
+[the review report](evidence/review-2026-09-17.md).
 
 ## Installation layout
 
@@ -73,7 +79,7 @@ behavior.
 [gcode_macro PREPARE_TOOL]
 gcode:
     START NAME=load
-        T0
+        LOAD_TRANSPORT
         {% set result.lane = reply.lane %}
     END
 
@@ -81,6 +87,12 @@ gcode:
     WAIT ON=load
     M117 Loaded lane {waited[0].lane}
 ```
+
+`LOAD_TRANSPORT` above represents a cooperating device command, not a command
+provided by this plugin. Managed Jinja statements (`{% ... %}`) must occupy
+separate physical lines from G-code/output expressions. Inline value expressions
+such as `G1 X{params.X}` work normally. Output-producing Jinja filter/call blocks
+are rejected in managed mode; legacy templates are unchanged.
 
 `reply` is the structured response from the current ordinary command. A driver
 can provide it from its command handler:
@@ -109,12 +121,30 @@ Jinja `default` filter is used explicitly.
   invalidate active runs and wake suspended waits.
 - Unrelated external requests retain normal Klipper mutex serialization; only
   routines belonging to the lock owner's run receive cooperative admission.
+- Failed/cancelled runs cannot issue subsequent ordinary commands, including
+  commands in legacy helpers. Known pause/cancel/emergency handlers and configured
+  virtual-SD error cleanup retain a scoped recovery path (no routine controls).
 
 Software completion is not proof that buffered motion has physically stopped.
 Use the existing Klipper barrier required by the underlying command (for
 example, `M400`) before `END` when physical completion matters. Concurrent
 commands still share the same printer hardware and must be synchronized by the
 author.
+
+## Single-FPS OpenAMS macros
+
+`config/oams_macros.cfg` preserves `T0`–`T3` and standalone
+`SAFE_UNLOAD_FILAMENT`. A toolchange completes cutting/toolhead retraction and
+OAMS unloading first, then overlaps only OAMS loading with `CLEAN_NOZZLE`.
+`WAIT` precedes sensor validation, final extrusion, and position restoration.
+Driver state is checked because the current OAMS driver reports some failures
+without raising an exception.
+
+Call `T0`–`T3` from the default routine: these macros own their background child
+and cannot be placed inside another `START`. The printer must already be homed,
+hot enough to extrude, and unpaused. Optional inlet/outlet checks remain disabled
+until their corresponding switches are configured. Software tests do not validate
+cutter geometry, filament tuning, or physical transport success.
 
 ## Development and verification
 

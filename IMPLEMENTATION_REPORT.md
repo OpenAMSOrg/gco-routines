@@ -8,8 +8,11 @@ The working implementation is a self-contained Klipper extra in
 `klippy_extra/gco_routines`. It registers `START`, `END`, and `WAIT` and uses
 narrow runtime wrappers; no tracked Klipper file is patched.
 
-The target Pi was inspected read-only. Nothing was installed, no service was
-restarted, and no printer command was sent.
+After initial read-only development, the user explicitly authorized deployment.
+The extra and single-FPS `oams_macros.cfg` are now installed on the target Pi;
+the review corrections were deployed with backups and a Klipper service restart.
+No motion, heater, or OAMS transport commands were requested during review.
+Hardware validation remains blocked by the existing missing OAMS CAN MCU.
 
 ## Baselines
 
@@ -20,9 +23,10 @@ restarted, and no printer command was sent.
 
 The target reports Python 3.9.2, Jinja 3.1.6, and greenlet 2.0.2. Local real
 reactor tests ran with Python 3.12.3, Jinja 3.1.6, and greenlet 3.3.2. Every
-plugin module also parses with Python 3.9 grammar. The exact target environment
-has not executed the plugin because project safety rules prohibit printer-side
-installation during development.
+plugin module also parses with Python 3.9 grammar. `tools/smoke_klipper.py` now
+also passes in the Pi's exact environment, running real Klippy and the actual
+macro source against inert handlers without opening the printer configuration,
+MCUs, or printer API. No target dependencies were installed or upgraded.
 
 A local trial merge of current upstream into the target branch conflicted in
 `klippy/msgproto.py`, where the target carries CAN-related changes. The merge
@@ -96,7 +100,20 @@ Verification command:
 .venv/bin/pytest -q
 ```
 
-Final recorded result: **212 passed**.
+Final recorded result after review: **242 passed in 2.38s**.
+
+Review regressions additionally cover live macro status refresh, stop-on-failure
+inside legacy helpers, cancelled queued template actions, complete API preflight
+and serialization, bounded run history, per-block collection limits, helper reply
+ownership, private child namespaces, Jinja `with`, and virtual-SD failure cleanup
+without a false completion/pause outcome. Actual OAMS macro tests cover repeated
+toolchanges, load/clean overlap, standalone unload, sensor and driver failures,
+invalid groups, cold extrusion prevention, and nested-toolchange rejection.
+
+The Pi smoke passed repeated toolchanges, load/clean overlap, and a deliberate
+sensor abort on Python 3.9.2. Its expected abort logs a Klipper command-error
+traceback; the harness verifies no later unload/load commands and exits zero.
+See [review evidence and deployed hashes](evidence/review-2026-09-17.md).
 
 The local installer was also run against the target checkout clone, the package
 was imported through `extras.gco_routines`, and the symlink was removed again;
@@ -104,8 +121,9 @@ tracked Klipper state remained clean.
 
 ## Operational limits
 
-- Physical devices were not actuated. Real-printer validation remains a
-  deployment step.
+- Physical workflows were not exercised. The service currently cannot connect
+  `oams_mcu1` (CAN UUID `66e4a3d0cd57`); the same error occurred with the original
+  configuration. Real-printer workflow validation remains outstanding.
 - The plugin coordinates host command execution; it does not create independent
   motion planners or hardware ownership. Authors must synchronize shared
   hardware explicitly.
@@ -113,5 +131,14 @@ tracked Klipper state remained clean.
   Klipper completion barrier before `END` when physical completion is required.
 - Managed macro sections must load after `[gco_routines]`; the plugin fails
   closed when it cannot retain their original source.
+- Managed Jinja statements must be on separate physical lines from output;
+  output-producing filter/call blocks are rejected instead of silently dropping
+  or fragmenting commands. Legacy Jinja behavior remains unchanged.
+- The supplied OpenAMS `T0`–`T3` macros spawn their own loading routine and must
+  run in the default routine, not inside an outer `START` block.
+- Routine records remain bounded to 1024 per run. Up to 64 recent runs are
+  retained, with only terminal, unbound runs eligible for eviction. Physical
+  device operations already accepted are subject to the driver's cancellation
+  behavior, not forcibly interrupted by the software scheduler.
 - Compatibility is intentionally pinned. A future Klipper `gcode.py` hash is
   rejected until its private seams are reviewed and added deliberately.
