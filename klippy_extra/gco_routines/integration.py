@@ -684,6 +684,14 @@ class IntegrationAdapter:
             original_load = macro_manager.load_template
             @functools.wraps(original_load)
             def load_template(config, option, default=None):
+                # PrinterGCodeMacro.load_template() is a shared Jinja service:
+                # display menus, delayed_gcode, idle_timeout, and other extras
+                # use it for text that is not a complete macro command source.
+                # A menu label such as "Start printing" must therefore remain
+                # ordinary template text, not be diagnosed as malformed START.
+                section = config.get_name().split(None, 1)[0].lower()
+                if section != "gcode_macro" or option.lower() != "gcode":
+                    return original_load(config, option, default)
                 if default is None:
                     source = config.get(option)
                 else:

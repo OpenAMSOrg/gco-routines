@@ -73,6 +73,22 @@ def test_real_macro_hook_captures_source_and_runs_managed(klippy_env):
                for item in env.manager.get_status()["routines"])
 
 
+def test_shared_template_loader_does_not_parse_non_macro_text(klippy_env):
+    class MenuConfig(MacroConfig):
+        def get_name(self):
+            return "menu __test start"
+
+        def get(self, option, default=None):
+            if option == "name":
+                return "Start printing"
+            return default
+
+    template = klippy_env.manager.macro_manager.load_template(
+        MenuConfig(klippy_env.printer, "IGNORED", ""), "name")
+    assert template.render({}) == "Start printing"
+    assert not hasattr(template, "gco_runner")
+
+
 def test_legacy_helper_macro_is_reentrant_across_routines(klippy_env):
     env = klippy_env
     reactor = env.reactor

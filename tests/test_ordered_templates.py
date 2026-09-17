@@ -1,4 +1,5 @@
 import builtins
+from pathlib import Path
 
 import pytest
 from jinja2 import Environment, StrictUndefined
@@ -194,3 +195,28 @@ def test_rendered_embedded_controls_are_rejected_before_dispatch():
             "{% set generated = 'ok\\nWAIT' %}\n"
             "START\nM117 {generated}\nEND\n"
         )
+
+
+def test_single_fps_oams_config_templates_parse_and_tx_is_managed():
+    path = Path(__file__).parents[1] / "config" / "oams_macros.cfg"
+    sections = []
+    name = None
+    body = []
+    in_gcode = False
+    for line in path.read_text().splitlines() + ["[end]"]:
+        if line.startswith("["):
+            if name is not None and in_gcode:
+                sections.append((name, "\n".join(body) + "\n"))
+            name, body, in_gcode = line.strip(), [], False
+        elif name is not None and line.strip() == "gcode:":
+            in_gcode = True
+        elif in_gcode:
+            body.append(line[4:] if line.startswith("    ") else line)
+
+    compiler = OrderedTemplateCompiler(env())
+    managed = []
+    for name, source in sections:
+        compiler.env.parse(source)
+        if compiler.compile(source, filename=name) is not None:
+            managed.append(name)
+    assert managed == ["[gcode_macro _TX]"]
