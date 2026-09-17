@@ -25,7 +25,7 @@ The implementation is validated locally against:
 - current upstream pin
   `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
 - real `SelectReactor` integration tests running locally on
-  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **243 tests passed**;
+  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **246 tests passed**;
 - the Pi's actual Python 3.9.2/Jinja 3.1.6/greenlet 2.0.2 environment,
   using real Klippy and the OAMS macro file with inert hardware handlers.
 
@@ -140,6 +140,16 @@ OAMS unloading first, then overlaps only OAMS loading with `CLEAN_NOZZLE`.
 `WAIT` precedes sensor validation, final extrusion, and position restoration.
 Driver state is checked because the current OAMS driver reports some failures
 without raising an exception.
+
+The same macro file is portable to an unmodified upstream Klipper. It tests for
+the configured `[gco_routines]` object before rendering control instructions. If
+the extra is absent, stock Klipper never receives `START`, `END`, or `WAIT` and
+runs OAMS loading followed by nozzle cleaning in ordinary serial order. Separate
+continuation macros preserve fresh unload, load, inlet, and outlet checks despite
+stock Klipper's render-entire-macro behavior. This fallback applies to the supplied
+macro workflow; raw G-code files containing control instructions still require a
+sender-side capability check because an absent receiver extension cannot consume
+unknown commands.
 
 Call `T0`–`T3` from the default routine: these macros own their background child
 and cannot be placed inside another `START`. The printer must already be homed,

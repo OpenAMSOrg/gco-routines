@@ -8,9 +8,7 @@ from extras import gcode_macro
 from test_review_regressions import execute
 
 
-@pytest.fixture
-def oams(klippy_env):
-    env = klippy_env
+def _build_oams(env, has_gco):
     path = Path(__file__).parents[2] / 'config/oams_macros.cfg'
     parsed = configfile.ConfigFileReader().build_fileconfig(path.read_text(), str(path))
     for section in parsed.sections():
@@ -23,7 +21,10 @@ def oams(klippy_env):
         'pause_resume': {'is_paused': False},
         'exclude_object': {'current_object': '', 'excluded_objects': []},
         # Real ConfigFile.get_status() normalizes section keys to lowercase.
-        'configfile': {'settings': {'filament_group t%d' % i: {} for i in range(4)}},
+        'configfile': {'settings': {
+            **{'filament_group t%d' % i: {} for i in range(4)},
+            **({'gco_routines': {}} if has_gco else {}),
+        }},
         'filament_switch_sensor extruder_in': {'filament_detected': True},
         'filament_switch_sensor extruder_out': {'filament_detected': False},
     }
@@ -55,13 +56,24 @@ def oams(klippy_env):
     def pause(g):
         events.append('pause')
         status['pause_resume']['is_paused'] = True
-        env.manager.set_paused(True)
+        if env.manager is not None:
+            env.manager.set_paused(True)
     env.gcode.register_command('OAMSM_UNLOAD_FILAMENT', unload)
     env.gcode.register_command('OAMSM_LOAD_FILAMENT', load)
     env.gcode.register_command('CLEAN_NOZZLE', clean)
     env.gcode.register_command('PAUSE', pause)
     return SimpleNamespace(env=env, events=events, status=status, controls=controls,
         variables=env.printer.lookup_object('gcode_macro _oams_macro_variables').variables)
+
+
+@pytest.fixture
+def oams(klippy_env):
+    return _build_oams(klippy_env, has_gco=True)
+
+
+@pytest.fixture
+def stock_oams(stock_klippy_env):
+    return _build_oams(stock_klippy_env, has_gco=False)
 
 
 def test_repeated_single_fps_changes_and_load_clean_overlap(oams):
@@ -72,6 +84,24 @@ def test_repeated_single_fps_changes_and_load_clean_overlap(oams):
     assert oams.events.index('unload-end') < oams.events.index('load-start')
     assert oams.events.index('clean-start') < oams.events.index('load-end') < oams.events.index('clean-end')
     assert oams.events.count('G1 E48.0 F1000') == 2
+
+
+def test_stock_upstream_uses_serial_fallback_without_reserved_commands(stock_oams):
+    handlers = stock_oams.env.gcode.ready_gcode_handlers
+    assert all(command not in handlers for command in ('START', 'END', 'WAIT'))
+    assert not execute(stock_oams.env, 'T1')
+    assert stock_oams.status['oams_manager']['current_group'] == 'T1'
+    assert stock_oams.events.index('load-start') < stock_oams.events.index('load-end')
+    assert stock_oams.events.index('load-end') < stock_oams.events.index('clean-start')
+    assert stock_oams.events.index('clean-start') < stock_oams.events.index('clean-end')
+    assert 'G1 E48.0 F1000' in stock_oams.events
+
+
+def test_stock_upstream_rechecks_load_result_before_extruding(stock_oams):
+    stock_oams.controls['load_success'] = False
+    assert execute(stock_oams.env, 'T1')
+    assert stock_oams.status['pause_resume']['is_paused']
+    assert 'G1 E48.0 F1000' not in stock_oams.events
 
 
 def test_standalone_safe_unload_finishes_transport(oams):

@@ -91,6 +91,88 @@ os.close(rfd); os.close(wfd)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_current_upstream_runs_oams_macro_serial_fallback():
+    """The portable macro must not dispatch controls when the extra is absent."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    upstream = os.path.join(root, "vendor", "klipper-upstream", "klippy")
+    macro_path = os.path.join(root, "config", "oams_macros.cfg")
+    script = r'''
+import os, sys
+from types import SimpleNamespace
+sys.path[:0] = [%r, %r]
+import reactor, klippy, configfile
+from extras import gcode_macro
+rfd, wfd = os.pipe()
+r = reactor.SelectReactor()
+p = klippy.Printer(r, None, {"gcode_fd": wfd, "debuginput": True})
+for timer in list(r._timers):
+    callback = (getattr(timer, "underlying_callback", None)
+                or getattr(timer, "callback", None))
+    if callback == p._connect:
+        r.unregister_timer(timer)
+p.add_object("gcode_macro", gcode_macro.PrinterGCodeMacro(
+    SimpleNamespace(get_printer=lambda: p)))
+g = p.lookup_object("gcode")
+g.output_callbacks.clear()
+state = {
+    "oams_manager": {"current_group": None},
+    "toolhead": {"homed_axes": "xyz"},
+    "extruder": {"can_extrude": True, "temperature": 220.0},
+    "pause_resume": {"is_paused": False},
+    "exclude_object": {"current_object": "", "excluded_objects": []},
+    "configfile": {"settings": {
+        "filament_group t0": {}, "filament_group t1": {},
+        "filament_group t2": {}, "filament_group t3": {},
+    }},
+    "filament_switch_sensor extruder_in": {"filament_detected": True},
+    "filament_switch_sensor extruder_out": {"filament_detected": False},
+}
+for name, values in state.items():
+    p.add_object(name, SimpleNamespace(
+        get_status=lambda eventtime, values=values: dict(values)))
+parsed = configfile.ConfigFileReader().build_fileconfig(
+    open(%r).read(), %r)
+for section in parsed.sections():
+    cfg = configfile.ConfigWrapper(p, parsed, {}, section)
+    p.add_object(section, gcode_macro.GCodeMacro(cfg))
+events = []
+for command in ("RESPOND", "SAVE_GCODE_STATE", "RESTORE_GCODE_STATE",
+                "SET_STEPPER_ENABLE", "M83", "G1", "M400", "G4"):
+    g.register_command(command, lambda gcmd: events.append(gcmd.get_command()))
+def load(gcmd):
+    events.append("load")
+    state["oams_manager"]["current_group"] = gcmd.get("GROUP")
+g.register_command("OAMSM_LOAD_FILAMENT", load)
+g.register_command("CLEAN_NOZZLE", lambda gcmd: events.append("clean"))
+g.register_command("PAUSE", lambda gcmd: events.append("pause"))
+p.send_event("klippy:ready")
+assert all(command not in g.ready_gcode_handlers
+           for command in ("START", "END", "WAIT"))
+errors = []
+def invoke(eventtime):
+    try:
+        g.is_fileinput = False
+        p.lookup_object("gcode_io").is_fileinput = False
+        g.run_script("T1")
+    except Exception as exc:
+        errors.append(exc)
+    finally:
+        r.end()
+r.register_callback(invoke)
+r.run()
+assert not errors, errors
+assert events.index("load") < events.index("clean"), events
+assert state["oams_manager"]["current_group"] == "T1"
+assert "G1" in events
+os.close(rfd); os.close(wfd)
+''' % (upstream, root, macro_path, macro_path)
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=root,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_installer_adds_and_removes_only_the_extra_symlink(tmp_path):
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     checkout = tmp_path / "klipper"

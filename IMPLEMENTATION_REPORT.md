@@ -102,7 +102,8 @@ Verification command:
 .venv/bin/pytest -q
 ```
 
-Final recorded result after live follow-up: **243 passed in 2.51s**.
+Final recorded result after the upstream serial-fallback work: **246 passed in
+2.88s**.
 
 Review regressions additionally cover live macro status refresh, stop-on-failure
 inside legacy helpers, cancelled queued template actions, complete API preflight
@@ -111,6 +112,9 @@ ownership, private child namespaces, Jinja `with`, and virtual-SD failure cleanu
 without a false completion/pause outcome. Actual OAMS macro tests cover repeated
 toolchanges, load/clean overlap, standalone unload, sensor and driver failures,
 invalid groups, cold extrusion prevention, and nested-toolchange rejection.
+They also run the same OAMS macro file against a real stock Klippy harness with
+no gco-routines manager or reserved commands registered, proving that it emits a
+serial load/clean sequence and rechecks a failed load before permitting extrusion.
 
 The Pi smoke passed repeated toolchanges, load/clean overlap, and a deliberate
 sensor abort on Python 3.9.2. Its expected abort logs a Klipper command-error
