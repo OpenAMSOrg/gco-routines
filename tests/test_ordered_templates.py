@@ -1,3 +1,5 @@
+import builtins
+
 import pytest
 from jinja2 import Environment, StrictUndefined
 
@@ -134,6 +136,18 @@ def test_locals_are_copied_at_start_not_read_later():
     assert ("run:1", "M117 before") in runtime.events
 
 
+def test_child_locals_and_future_parent_names_are_not_eagerly_snapshotted():
+    runtime, _result = run(
+        "START\n"
+        "{% set child_local = 'inside' %}\n"
+        "M117 {child_local}\n"
+        "END\n"
+        "{% set future_parent = 'later' %}\n"
+        "WAIT\n"
+    )
+    assert ("run:1", "M117 inside") in runtime.events
+
+
 def test_missing_fields_are_strict_but_default_filter_is_available():
     runtime, _result = run(
         "START\n"
@@ -145,10 +159,38 @@ def test_missing_fields_are_strict_but_default_filter_is_available():
         run("START\nM117 { reply.missing }\nEND\n")
 
 
+def test_managed_compiler_overlays_klipper_permissive_undefined():
+    permissive = Environment(
+        variable_start_string="{", variable_end_string="}",
+        autoescape=False,
+    )
+    compiler = OrderedTemplateCompiler(permissive)
+    assert compiler.env.undefined is StrictUndefined
+    runner = compiler.compile("START\nM117 { missing }\nEND\n")
+    runtime = FakeRuntime()
+    with pytest.raises(Exception):
+        runner.execute(runtime, {}, runtime.run.default)
+
+
+def test_standalone_fallback_rejects_cross_region_controls(monkeypatch):
+    real_import = builtins.__import__
+
+    def without_reference(name, *args, **kwargs):
+        if name == "gcoroutines.frontend":
+            raise ImportError("standalone extra")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_reference)
+    compiler = OrderedTemplateCompiler(env())
+    with pytest.raises(OrderedTemplateError, match="E_TEMPLATE_REGION"):
+        compiler.compile("{% if enabled %}\nSTART\n{% endif %}\nEND\n")
+    with pytest.raises(OrderedTemplateError, match="E_CAPTURED_CONTROL"):
+        compiler.compile("{% set text %}\nSTART\nM117 nope\nEND\n{% endset %}")
+
+
 def test_rendered_embedded_controls_are_rejected_before_dispatch():
     with pytest.raises(OrderedTemplateError, match="E_GENERATED_CONTROL"):
         run(
             "{% set generated = 'ok\\nWAIT' %}\n"
             "START\nM117 {generated}\nEND\n"
         )
-

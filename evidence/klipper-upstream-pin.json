@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/Klipper3d/klipper.git",
+  "requested_ref": "master",
+  "commit": "ad425fc22e01ca05db4852a81dfa9dab17373ff8",
+  "fetched_at_utc": "2026-09-17T17:51:26.833466+00:00",
+  "tracked_worktree_checked_out": true,
+  "submodules_initialized": false,
+  "git_history_shallow": true,
+  "selected_file_sha256": {
+    "klippy/gcode.py": "a2bcd6949b4263f608eaa71ba1cdfb713553542b7b90de739241b624f06415ae",
+    "klippy/reactor.py": "9ef3e8b4778c5a7535febe8437aa89e0720fc2e65e39899eaf96e0ed2953fb25",
+    "klippy/klippy.py": "aa9eb47fbe3598fc814d40ed8e0b2b814a0af459fca7acab6732c59bf42e4659",
+    "klippy/extras/gcode_macro.py": "16ba212109cc5ea3c9e4f2edfbeaac8a0547ad841f52ac0fd3df5669569203bd",
+    "klippy/extras/virtual_sdcard.py": "df21babd834915f06063d3bb6d27ee8d0cfe8dfc15b861409c151ebe7a7626d1",
+    "klippy/extras/pause_resume.py": "366d623aadbf50575e8a4659683cf4fcecce833f414a75c54ad279facc8e1998",
+    "klippy/webhooks.py": "e1f1758e10bb308479e46c4ecb8e73e1d86f2ff00e23e881060c63f14c7b5dab",
+    "scripts/klippy-requirements.txt": "e6a89a69d723826dae9734be5a2898fa643ebbd16e099721c0f1151fb111f1e9",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "validation": "Downloaded and hashed only; no compatibility tests run by this script."
+}

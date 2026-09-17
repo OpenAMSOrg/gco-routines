@@ -1,0 +1,20 @@
+{
+  "observed_at": "2026-09-17",
+  "host": "pi@192.168.1.12",
+  "klipper_path": "~/klipper",
+  "klipper_commit": "c0c7ef2a5a82f1b60c207fb02274c6536bb952cb",
+  "klipper_branch": "master",
+  "python": "3.9.2",
+  "jinja2": "3.1.6",
+  "greenlet": "2.0.2",
+  "inspection": "Read-only SSH inspection; no files, configuration, services, or printer state were changed.",
+  "upstream_merge_probe": {
+    "upstream_commit": "ad425fc22e01ca05db4852a81dfa9dab17373ff8",
+    "performed_in": "temporary local clone",
+    "result": "conflict",
+    "conflicting_paths": [
+      "klippy/msgproto.py"
+    ],
+    "deployed": false
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "repository": "ssh://pi@192.168.1.12/home/pi/klipper",
+  "requested_ref": "c0c7ef2a5a82f1b60c207fb02274c6536bb952cb",
+  "commit": "c0c7ef2a5a82f1b60c207fb02274c6536bb952cb",
+  "recorded_at_utc": "2026-09-17T17:57:46.678668+00:00",
+  "tracked_worktree_checked_out": true,
+  "selected_file_sha256": {
+    "klippy/gcode.py": "7cd92950767a06c9778d540360fe3ce23e51ec1a6b0423c3defc96d228bf96cc",
+    "klippy/reactor.py": "9ef3e8b4778c5a7535febe8437aa89e0720fc2e65e39899eaf96e0ed2953fb25",
+    "klippy/klippy.py": "aa9eb47fbe3598fc814d40ed8e0b2b814a0af459fca7acab6732c59bf42e4659",
+    "klippy/extras/gcode_macro.py": "01768184b7a42f91a6a9e95fcf746895f5c0559841876e91afbb3cc01a880560",
+    "klippy/extras/virtual_sdcard.py": "fc8c38f37d4e298bff0a46c20a719e564a398b79b0d5314d55cf4d0a4597083f",
+    "klippy/extras/pause_resume.py": "366d623aadbf50575e8a4659683cf4fcecce833f414a75c54ad279facc8e1998",
+    "klippy/webhooks.py": "05cbcf2a15f4537aeaad92c9bee1e5132c914132228b536dca224584eff5ddeb",
+    "scripts/klippy-requirements.txt": "a312e32d568131ad28d820bb8d15f7f7b50a70c5e876223d8d4ea9b2884af268",
+    "COPYING": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "validation": "Recorded and hashed an existing clean tracked checkout only; compatibility tests are recorded separately."
+}

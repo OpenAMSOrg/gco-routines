@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import jinja2
-from jinja2 import nodes
+from jinja2 import meta, nodes
 
 try:  # Jinja 2.11 calls this contextfunction; 3.x calls it pass_context.
     _pass_context = jinja2.pass_context
@@ -28,6 +28,7 @@ except AttributeError:  # pragma: no cover - exercised on Klipper's older Jinja
 
 
 _CONTROL_NAMES = frozenset(("START", "END", "WAIT"))
+_MAX_MANAGED_OUTPUT = 1024 * 1024
 _INTERNAL_NAMES = frozenset(
     ("result", "reply", "waited", "printer", "_gco_dispatch", "_gco_wait", "_gco_spawn")
 )
@@ -74,55 +75,136 @@ def _frontend_api():
             return SimpleNamespace(kind="wait", line=line, targets=m.group(1).split(",") if m.group(1) else None)
 
         def fallback_parse(source, filename="<macro>", template=True):
-            # Parse Jinja syntax before examining control lines.  Klipper's
-            # command-template delimiters are single braces.
+            # Deploy-time subset of the reference frontend. Controls are
+            # recognized only in literal TemplateData occupying a complete
+            # source line, and START/END must share one Jinja region.
             try:
                 env = jinja2.Environment(
                     variable_start_string="{", variable_end_string="}",
                     undefined=jinja2.StrictUndefined,
                 )
-                env.parse(source)
+                tree = env.parse(source)
             except Exception as exc:
                 return SimpleNamespace(
                     ok=False,
-                    diagnostics=[SimpleNamespace(code="E_JINJA_SYNTAX", line=getattr(exc, "lineno", 1), severity="error", message=str(exc))],
+                    diagnostics=[SimpleNamespace(
+                        code="E_JINJA_SYNTAX",
+                        line=getattr(exc, "lineno", 1), severity="error",
+                        message=str(exc))],
                     nodes=[],
                 )
+
+            raw_lines = source.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+            controls = {}
+            diagnostics = []
+            captured_types = {"AssignBlock", "FilterBlock", "Macro", "CallBlock", "Block"}
+            unsupported = []
+
+            def content(value):
+                return value.split(";", 1)[0].strip()
+
+            def visit(item, region="root", captured=False):
+                kind = type(item).__name__
+                captured = captured or kind in captured_types
+                if kind in {"Include", "Import", "FromImport", "Extends"}:
+                    unsupported.append(item)
+                if isinstance(item, nodes.TemplateData):
+                    for offset, fragment in enumerate(item.data.split("\n")):
+                        lineno = item.lineno + offset
+                        if not (1 <= lineno <= len(raw_lines)):
+                            continue
+                        node = line_control(fragment, lineno)
+                        if node is None:
+                            continue
+                        if node.kind == "error":
+                            diagnostics.append(SimpleNamespace(
+                                code=node.code, line=lineno, severity="error",
+                                message="Malformed control"))
+                            continue
+                        if content(fragment) != content(raw_lines[lineno - 1]):
+                            diagnostics.append(SimpleNamespace(
+                                code="E_LITERAL_CONTROL", line=lineno,
+                                severity="error",
+                                message="Control must occupy a complete literal line"))
+                            continue
+                        if captured:
+                            diagnostics.append(SimpleNamespace(
+                                code="E_CAPTURED_CONTROL", line=lineno,
+                                severity="error",
+                                message="Captured template text may not contain controls"))
+                        node.region = region
+                        node.body = []
+                        node.end_line = None
+                        node.targets = getattr(node, "targets", None)
+                        node.name = getattr(node, "name", None)
+                        controls[lineno] = node
+                    return
+                for attr, value in item.iter_fields():
+                    if isinstance(value, list):
+                        for child in value:
+                            if isinstance(child, nodes.Node):
+                                child_region = (region if kind in {"Template", "Output"}
+                                                else "%s/%s@%s.%s" %
+                                                (region, kind, item.lineno, attr))
+                                visit(child, child_region, captured)
+                    elif isinstance(value, nodes.Node):
+                        visit(value, region, captured)
+
+            visit(tree)
+            if controls and unsupported:
+                diagnostics.append(SimpleNamespace(
+                    code="E_TEMPLATE_COMPOSITION",
+                    line=unsupported[0].lineno, severity="error",
+                    message="Managed templates may not import or extend templates"))
+
             top = []
             block = None
-            diagnostics = []
-            lines = source.replace("\r\n", "\n").replace("\r", "\n").splitlines()
-            for lineno, raw in enumerate(lines, 1):
-                node = line_control(raw, lineno)
-                if node is not None and node.kind == "error":
-                    diagnostics.append(SimpleNamespace(code=node.code, line=lineno, severity="error", message="Malformed control"))
-                    continue
+            for lineno, raw in enumerate(raw_lines, 1):
+                node = controls.get(lineno)
                 if node is None:
-                    continue
+                    node = SimpleNamespace(kind="template_source", line=lineno,
+                                           text=raw, body=[])
                 if node.kind == "start":
                     if block is not None:
-                        diagnostics.append(SimpleNamespace(code="E_NESTED_START", line=lineno, severity="error", message="Nested START"))
+                        diagnostics.append(SimpleNamespace(
+                            code="E_NESTED_START", line=lineno,
+                            severity="error", message="Nested START"))
                     else:
+                        node.kind = "routine"
                         block = node
                         top.append(node)
                 elif node.kind == "end":
                     if block is None:
-                        diagnostics.append(SimpleNamespace(code="E_UNMATCHED_END", line=lineno, severity="error", message="Unmatched END"))
+                        diagnostics.append(SimpleNamespace(
+                            code="E_UNMATCHED_END", line=lineno,
+                            severity="error", message="Unmatched END"))
                     else:
+                        if block.region != node.region:
+                            diagnostics.append(SimpleNamespace(
+                                code="E_TEMPLATE_REGION", line=lineno,
+                                severity="error",
+                                message="START and END must share a Jinja body/branch"))
                         block.end_line = lineno
-                        block.kind = "routine"
                         block = None
-                elif node.kind == "wait":
+                elif block is not None:
+                    block.body.append(node)
+                else:
                     top.append(node)
             if block is not None:
-                diagnostics.append(SimpleNamespace(code="E_UNCLOSED_START", line=block.line, severity="error", message="Unclosed START"))
-            return SimpleNamespace(ok=not diagnostics, diagnostics=diagnostics, nodes=top)
+                diagnostics.append(SimpleNamespace(
+                    code="E_UNCLOSED_START", line=block.line,
+                    severity="error", message="Unclosed START"))
+            return SimpleNamespace(ok=not diagnostics,
+                                   diagnostics=diagnostics, nodes=top)
 
         def fallback_guard(text):
             diagnostics = []
             for line, raw in enumerate(text.splitlines(), 1):
-                match = control_re.match(raw.split(";", 1)[0].strip())
-                if match and match.group(1).upper() in _CONTROL_NAMES:
+                clean = raw.split(";", 1)[0].strip()
+                match = control_re.match(clean)
+                transport = re.match(r"^N\d+\s*(?:START|END|WAIT)\b",
+                                     clean, re.I | re.ASCII)
+                if transport or (match and match.group(1).upper() in _CONTROL_NAMES):
                     diagnostics.append(SimpleNamespace(code="E_GENERATED_CONTROL", line=line, message="Generated controls are not allowed"))
                     break
             return diagnostics
@@ -336,29 +418,6 @@ def _static_output_text(item: nodes.Node) -> Optional[str]:
     return "".join(child.data for child in item.nodes)
 
 
-def _walk_names(node: nodes.Node) -> List[str]:
-    """Collect names used by a template for START-time local snapshots."""
-
-    names = set()
-
-    def visit(item):
-        if isinstance(item, nodes.Name) and item.ctx == "load" and item.name not in _INTERNAL_NAMES:
-            names.add(item.name)
-            return
-        if not isinstance(item, nodes.Node):
-            return
-        for _attr, value in item.iter_fields():
-            if isinstance(value, list):
-                for child in value:
-                    if isinstance(child, nodes.Node):
-                        visit(child)
-            elif isinstance(value, nodes.Node):
-                visit(value)
-
-    visit(node)
-    return sorted(names)
-
-
 def _snapshot_plain(value):
     """Copy ordinary local data while leaving host objects shared."""
 
@@ -460,6 +519,7 @@ class OrderedTemplate:
         reply = LiveReplyProxy(routine_reply, undefined)
         waited = LiveWaitedProxy(routine_waited, undefined)
         result = jinja2.utils.Namespace()
+        output_size = [0]
         original_printer = dict(context_vars).get("printer")
         if isinstance(original_printer, LiveGetStatusWrapper):
             printer = original_printer
@@ -478,6 +538,10 @@ class OrderedTemplate:
             raw = str(text).strip()
             if not raw or raw.startswith(";"):
                 return ""
+            output_size[0] += len(raw)
+            if output_size[0] > _MAX_MANAGED_OUTPUT:
+                raise jinja2.exceptions.SecurityError(
+                    "managed template output is too large")
             _unused_parse, guard_rendered_commands = _frontend_api()
             diagnostics = guard_rendered_commands(raw)
             if diagnostics:
@@ -574,11 +638,19 @@ class OrderedTemplateCompiler:
     """Parse, validate and compile a literal-control Jinja macro once."""
 
     def __init__(self, env: Optional[jinja2.Environment] = None):
-        self.env = env or jinja2.Environment(
-            undefined=jinja2.StrictUndefined,
-            autoescape=False,
-            keep_trailing_newline=True,
-        )
+        if env is None:
+            self.env = jinja2.Environment(
+                undefined=jinja2.StrictUndefined,
+                autoescape=False,
+                keep_trailing_newline=True,
+            )
+        else:
+            # Klipper intentionally uses permissive Undefined for legacy
+            # macros.  Managed routines require missing reply/waited fields to
+            # fail unless the template explicitly applies |default, so compile
+            # them in an overlay that retains Klipper's sandbox, delimiters,
+            # filters, globals, and tests while changing only Undefined.
+            self.env = env.overlay(undefined=jinja2.StrictUndefined)
 
     def compile(self, source: str, filename: str = "<macro>") -> Optional[OrderedTemplate]:
         parse, _unused_guard = _frontend_api()
@@ -615,12 +687,16 @@ class OrderedTemplateCompiler:
         for top in report.nodes:
             register(top)
 
-        names = _walk_names(tree)
         children: List[_Child] = []
 
-        def snapshot_expression():
+        def snapshot_expression(names):
             pairs = [nodes.Pair(nodes.Const(name), nodes.Name(name, "load")) for name in names]
             return nodes.Dict(pairs)
+
+        def free_names(body_items):
+            child_tree = nodes.Template(copy.deepcopy(list(body_items)))
+            child_tree.set_environment(self.env)
+            return sorted(meta.find_undeclared_variables(child_tree) - _INTERNAL_NAMES)
 
         def transform(body: Sequence[nodes.Node]) -> List[nodes.Node]:
             split = _split_output_nodes(body)
@@ -664,6 +740,7 @@ class OrderedTemplateCompiler:
                         cursor += 1
                     if not found:
                         raise OrderedTemplateError("START at line %s has no matching END" % control.line)
+                    child_names = free_names(body_items)
                     child_body = transform(body_items)
                     child_tree = nodes.Template(child_body, lineno=control.line)
                     child_code = self.env.compile(child_tree)
@@ -679,7 +756,8 @@ class OrderedTemplateCompiler:
                     children.append(_Child(control.name, child, control.line))
                     call = nodes.Call(
                         nodes.Name("_gco_spawn", "load"),
-                        [nodes.Const(control.name), nodes.Const(child_index), snapshot_expression()],
+                        [nodes.Const(control.name), nodes.Const(child_index),
+                         snapshot_expression(child_names)],
                         [], None, None,
                     )
                     transformed.append(nodes.Output([nodes.MarkSafeIfAutoescape(call)], lineno=control.line))
