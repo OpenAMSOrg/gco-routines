@@ -1,0 +1,13 @@
+// SINGLE normalized control line; ASCII case-insensitive keywords/keys.
+?start: start_command | end_command | wait_command
+start_command: _START (_WS _NAME "=" IDENT)?
+end_command: _END
+wait_command: _WAIT (_WS _ON "=" names)?
+names: IDENT ("," IDENT)*
+_START: /(?ai:START)/
+_END: /(?ai:END)/
+_WAIT: /(?ai:WAIT)/
+_NAME: /(?ai:NAME)/
+_ON: /(?ai:ON)/
+IDENT: /[A-Za-z_][A-Za-z0-9_]*/
+_WS: /[ \t]+/

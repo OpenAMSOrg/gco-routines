@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gco-routines-reference"
+version = "0.2.0"
+description = "Validation frontend and semantic reference for a proposed Klipper extra; not a printer runtime"
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+template = ["Jinja2>=2.11.3,<4"]
+test = ["pytest>=7", "Jinja2>=2.11.3,<4", "lark>=1.1,<2"]
+
+[project.scripts]
+gco-validate = "gcoroutines.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["gcoroutines*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

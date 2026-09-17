@@ -1,0 +1,17 @@
+{
+  "note": "Illustrative developer-owned command contracts, not existing Klipper capabilities. No automatic result type checker is implemented.",
+  "commands": {
+    "T0": {
+      "completion": "material physically presented at declared handoff",
+      "reply": {
+        "lane": "integer",
+        "loaded_mm": "number in mm",
+        "used_fallback": "boolean"
+      }
+    },
+    "M109": {
+      "completion": "existing host command completion",
+      "reply": {}
+    }
+  }
+}

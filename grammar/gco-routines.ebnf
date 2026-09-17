@@ -1,0 +1,38 @@
+(* Draft 0.2. Lexical rules below are part of the contract. *)
+program          = { item } ;
+item             = ordinary_line | empty_line | wait_line | routine ;
+routine          = start_line, { routine_item }, end_line ;
+routine_item     = ordinary_line | empty_line | wait_line ;
+start_line       = ws, START, [ wsp, NAME, "=", identifier ], ws, [ comment ], eol ;
+end_line         = ws, END, ws, [ comment ], eol ;
+wait_line        = ws, WAIT, [ wsp, ON, "=", name_list ], ws, [ comment ], eol ;
+name_list        = identifier, { ",", identifier } ;
+identifier       = letter_or_underscore, { letter_or_underscore | digit } ;
+letter_or_underscore = "A".."Z" | "a".."z" | "_" ;
+digit            = "0".."9" ;
+ws               = { " " | "\t" } ;
+wsp              = (" " | "\t"), ws ;
+eol              = "\n" ;
+comment          = ";", { non_newline_character } ;
+empty_line       = ws, [ comment ], eol ;
+ordinary_line    = OPAQUE_GCODE_LINE, eol ;
+
+(* START, END, WAIT, NAME, ON match ASCII case-insensitively.
+   Identifier VALUES preserve case. 'default' is semantically reserved.
+   Normalize CRLF/CR to LF and synthesize the final newline for parsing only.
+   Control commands must occupy a complete physical line; indentation is ignored.
+   OPAQUE_GCODE_LINE excludes lines whose first command token is START/END/WAIT.
+   All other ordinary-command spelling, parameters and comments belong to the
+   existing host grammar and are preserved verbatim; this is NOT a replacement
+   grammar for every G-code dialect. A malformed reserved command cannot escape
+   into OPAQUE_GCODE_LINE. The START grammar has no recursive routine production:
+   direct nesting is a syntax error. Commands like START_PRINT remain ordinary.
+   Host transport framing (line numbers/checksums) is outside this grammar and
+   must be validated/decoded by an ingress adapter BEFORE this parser is called.
+   The reference CLI rejects transport-framed extension commands, not ordinary
+   transport-framed legacy lines. It never silently validates a hidden START.
+
+   The flat extension is regular, hence also context-free. A context-free
+   description makes composition/tooling precise; it is not a claim that the
+   entire host language, Jinja expansion, name binding or concurrency is CFG-only.
+*)

@@ -1,0 +1,11 @@
+; Macro BODY, using existing Klipper {expression} delimiters.
+START NAME=filament_change
+    T0
+    ; These are example driver-provided fields, not stock T0 output.
+    {% set result.lane = reply.lane %}
+    {% set result.loaded_mm = reply.loaded_mm %}
+END
+CLEAN_NOZZLE
+WAIT ON=filament_change
+{% set change = waited[0] %}
+M117 Loaded lane {change.lane}

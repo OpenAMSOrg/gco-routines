@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "source": "examples/toolchange.gcode",
+  "mode": "gcode",
+  "ok": true,
+  "validation_level": "extension-syntax+closed-world-name-checks",
+  "template_control_flow": false,
+  "runtime_checks_required": [
+    "name/instance binding",
+    "active wait cycles",
+    "result data",
+    "host command validity",
+    "device/resource policy"
+  ],
+  "ast": [
+    {
+      "kind": "command",
+      "line": 1,
+      "text": "; The caller has parked and released the previous material.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 2,
+      "text": "; Use M400 when earlier queued motion must physically finish before the fork.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 3,
+      "text": "M400",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 4,
+      "text": "START NAME=filament_change",
+      "column": 1,
+      "end_line": 7,
+      "name": "filament_change",
+      "targets": null,
+      "body": [
+        {
+          "kind": "command",
+          "line": 5,
+          "text": "    T0",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "command",
+          "line": 6,
+          "text": "    ; T0 must remain pending until the MMU confirms the requested operation.",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 8,
+      "text": "START NAME=nozzle_heating",
+      "column": 1,
+      "end_line": 10,
+      "name": "nozzle_heating",
+      "targets": null,
+      "body": [
+        {
+          "kind": "command",
+          "line": 9,
+          "text": "    M109 S220",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 11,
+      "text": "CLEAN_NOZZLE",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 12,
+      "text": "; Cleaning may overlap only if it does not conflict with T0's device resources.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "wait",
+      "line": 13,
+      "text": "WAIT ON=filament_change,nozzle_heating",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": [
+        "filament_change",
+        "nozzle_heating"
+      ],
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 14,
+      "text": "; Both routines succeeded. No implicit physical wait beyond each command's contract.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 15,
+      "text": "M117 Ready",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    }
+  ],
+  "diagnostics": []
+}

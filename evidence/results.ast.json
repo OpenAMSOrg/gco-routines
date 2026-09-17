@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "source": "examples/results.jinja",
+  "mode": "jinja",
+  "ok": true,
+  "validation_level": "extension-and-jinja-syntax",
+  "template_control_flow": false,
+  "runtime_checks_required": [
+    "name/instance binding",
+    "active wait cycles",
+    "result data",
+    "host command validity",
+    "device/resource policy",
+    "generated command guard",
+    "live template values"
+  ],
+  "ast": [
+    {
+      "kind": "template_source",
+      "line": 1,
+      "text": "; Macro BODY, using existing Klipper {expression} delimiters.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 2,
+      "text": "START NAME=filament_change",
+      "column": 1,
+      "end_line": 7,
+      "name": "filament_change",
+      "targets": null,
+      "body": [
+        {
+          "kind": "template_source",
+          "line": 3,
+          "text": "    T0",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 4,
+          "text": "    ; These are example driver-provided fields, not stock T0 output.",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 5,
+          "text": "    {% set result.lane = reply.lane %}",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 6,
+          "text": "    {% set result.loaded_mm = reply.loaded_mm %}",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 8,
+      "text": "CLEAN_NOZZLE",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "wait",
+      "line": 9,
+      "text": "WAIT ON=filament_change",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": [
+        "filament_change"
+      ],
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 10,
+      "text": "{% set change = waited[0] %}",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 11,
+      "text": "M117 Loaded lane {change.lane}",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    }
+  ],
+  "diagnostics": []
+}

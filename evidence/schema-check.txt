@@ -1,0 +1,1 @@
+Draft 2020-12 schema syntax and all 3 synthetic snapshots validated using jsonschema 4.26.0.

@@ -1,0 +1,11 @@
+// Executable CFG for normalized, unframed plain G-code.
+// Normalize CR/CRLF to LF; append LF if the last line lacks it.
+// Ordinary commands are opaque. Reserved malformed lines are never ordinary.
+start: item*
+?item: routine | WAIT_LINE | ORDINARY_LINE | BLANK_LINE
+routine: START_LINE (WAIT_LINE | ORDINARY_LINE | BLANK_LINE)* END_LINE
+START_LINE.3: /[ \t]*(?ai:START)(?:[ \t]+(?ai:NAME)=[A-Za-z_][A-Za-z0-9_]*)?[ \t]*(?:;[^\r\n]*)?\n/
+END_LINE.3: /[ \t]*(?ai:END)[ \t]*(?:;[^\r\n]*)?\n/
+WAIT_LINE.3: /[ \t]*(?ai:WAIT)(?:[ \t]+(?ai:ON)=[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)?[ \t]*(?:;[^\r\n]*)?\n/
+BLANK_LINE.2: /[ \t]*(?:;[^\r\n]*)?\n/
+ORDINARY_LINE.1: /[ \t]*(?!(?ai:(?:START|END|WAIT)\b))(?!(?ai:N[0-9]+[ \t]*(?:START|END|WAIT)\b))[^ \t\r\n][^\r\n]*\n/

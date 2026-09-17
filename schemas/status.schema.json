@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gco-routines current-state snapshot (proposed extra)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "revision",
+    "routines"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fault": {
+      "type": [
+        "null",
+        "string"
+      ]
+    },
+    "routines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "state",
+          "waiting_on"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "state": {
+            "enum": [
+              "running",
+              "waiting",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "command": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "source": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "waiting_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "detail": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

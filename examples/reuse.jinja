@@ -1,0 +1,9 @@
+{% for tool in [0, 1] %}
+    START NAME=filament
+        T{tool}
+        {% set result.lane = reply.lane %}
+    END
+    WAIT ON=filament
+    ; Starter collected this instance before the loop reuses its name.
+    M117 Selected {waited[0].lane}
+{% endfor %}

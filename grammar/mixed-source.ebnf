@@ -1,0 +1,37 @@
+(* Structural composition for managed macro SOURCE, BEFORE rendering.
+   Jinja expression/tag tokens are recognized and syntax-checked by the installed
+   Jinja parser using Klipper delimiters: {% ... %}, { ... }, {# ... #}.
+   The extension does not invent a second expression language. *)
+macro             = default_sequence ;
+default_sequence  = { default_item } ;
+default_item      = ordinary_template_line | jinja_atomic | wait_line
+                  | routine | default_if | default_for ;
+routine           = start_line, background_sequence, end_line ;
+background_sequence = { background_item } ;
+background_item   = ordinary_template_line | jinja_atomic | wait_line
+                  | background_if | background_for ;
+default_if        = IF, default_sequence,
+                    { ELIF, default_sequence }, [ ELSE, default_sequence ], ENDIF ;
+background_if     = IF, background_sequence,
+                    { ELIF, background_sequence }, [ ELSE, background_sequence ], ENDIF ;
+default_for       = FOR, default_sequence, [ ELSE, default_sequence ], ENDFOR ;
+background_for    = FOR, background_sequence, [ ELSE, background_sequence ], ENDFOR ;
+
+(* start_line/end_line/wait_line retain the EXACT literal grammar in
+   gco-routines.ebnf. They are not Jinja tags or rendered strings.
+   Each complete control command is on its own literal source line.
+   An entire routine may lie inside one if branch or loop body. A delimiter
+   cannot cross a branch/loop/scope boundary. Background bodies cannot START.
+   jinja_atomic: a Jinja assignment or other non-output-producing statement;
+   ordinary_template_line: an ordinary G-code line with optional expressions,
+   neither an extension control line nor a structurally generated command.
+   Block captures, includes/inheritance and macro text factories are outside the
+   portable managed-source subset when used to manufacture extension structure.
+   Additional ordinary Jinja constructs must retain scope semantics if supported;
+   a frontend must explicitly reject/report unsupported managed constructs rather
+   than silently flattening them. Legacy macros keep the host's existing rules.
+
+   This is a structural projection over Jinja tokens, NOT a full Jinja grammar.
+   Jinja syntax and these productions must BOTH be checked. Runtime name binding,
+   data availability and physical effects are not context-free syntax properties.
+*)

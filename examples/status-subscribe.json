@@ -1,0 +1,9 @@
+{
+  "id": 1,
+  "method": "objects/subscribe",
+  "params": {
+    "objects": {
+      "gco_routines": null
+    }
+  }
+}

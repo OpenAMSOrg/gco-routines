@@ -1,0 +1,13 @@
+START
+    T0
+    {% set result.lane = reply.lane %}
+END
+START
+    M109 S220
+    {% set result.ready = true %}
+END
+WAIT
+; Results are in START order, never completion order.
+{% set change = waited[0] %}
+{% set heating = waited[1] %}
+M117 Lane {change.lane}, heated={heating.ready}

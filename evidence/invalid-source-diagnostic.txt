@@ -1,0 +1,2 @@
+examples/invalid/cross-branch.jinja:4:1: error E_TEMPLATE_REGION: START and END must belong to the same Jinja body/branch.
+FAIL: extension-and-jinja-syntax; no commands executed

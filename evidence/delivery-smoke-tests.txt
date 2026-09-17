@@ -1,0 +1,413 @@
+$ python -m gcoroutines examples/toolchange.gcode --closed-world --json
+Exit code: 0
+STDOUT:
+{
+  "schema_version": 1,
+  "source": "examples/toolchange.gcode",
+  "mode": "gcode",
+  "ok": true,
+  "validation_level": "extension-syntax+closed-world-name-checks",
+  "template_control_flow": false,
+  "runtime_checks_required": [
+    "name/instance binding",
+    "active wait cycles",
+    "result data",
+    "host command validity",
+    "device/resource policy"
+  ],
+  "ast": [
+    {
+      "kind": "command",
+      "line": 1,
+      "text": "; The caller has parked and released the previous material.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 2,
+      "text": "; Use M400 when earlier queued motion must physically finish before the fork.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 3,
+      "text": "M400",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 4,
+      "text": "START NAME=filament_change",
+      "column": 1,
+      "end_line": 7,
+      "name": "filament_change",
+      "targets": null,
+      "body": [
+        {
+          "kind": "command",
+          "line": 5,
+          "text": "    T0",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "command",
+          "line": 6,
+          "text": "    ; T0 must remain pending until the MMU confirms the requested operation.",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 8,
+      "text": "START NAME=nozzle_heating",
+      "column": 1,
+      "end_line": 10,
+      "name": "nozzle_heating",
+      "targets": null,
+      "body": [
+        {
+          "kind": "command",
+          "line": 9,
+          "text": "    M109 S220",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 11,
+      "text": "CLEAN_NOZZLE",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 12,
+      "text": "; Cleaning may overlap only if it does not conflict with T0's device resources.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "wait",
+      "line": 13,
+      "text": "WAIT ON=filament_change,nozzle_heating",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": [
+        "filament_change",
+        "nozzle_heating"
+      ],
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 14,
+      "text": "; Both routines succeeded. No implicit physical wait beyond each command's contract.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "command",
+      "line": 15,
+      "text": "M117 Ready",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    }
+  ],
+  "diagnostics": []
+}
+
+STDERR:
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 772, in warm_spreadsheet_runtime
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/connection.py", line 37, in get_or_create_client
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/daemon.py", line 124, in start_daemon
+TimeoutError: Timed out waiting for artifact tool daemon socket. Set ARTIFACT_TOOL_RPC_DAEMON_STARTUP_TIMEOUT_S=<seconds> to increase the limit.
+
+
+$ python -m gcoroutines examples/results.jinja --template --json
+Exit code: 0
+STDOUT:
+{
+  "schema_version": 1,
+  "source": "examples/results.jinja",
+  "mode": "jinja",
+  "ok": true,
+  "validation_level": "extension-and-jinja-syntax",
+  "template_control_flow": false,
+  "runtime_checks_required": [
+    "name/instance binding",
+    "active wait cycles",
+    "result data",
+    "host command validity",
+    "device/resource policy",
+    "generated command guard",
+    "live template values"
+  ],
+  "ast": [
+    {
+      "kind": "template_source",
+      "line": 1,
+      "text": "; Macro BODY, using existing Klipper {expression} delimiters.",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "routine",
+      "line": 2,
+      "text": "START NAME=filament_change",
+      "column": 1,
+      "end_line": 7,
+      "name": "filament_change",
+      "targets": null,
+      "body": [
+        {
+          "kind": "template_source",
+          "line": 3,
+          "text": "    T0",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 4,
+          "text": "    ; These are example driver-provided fields, not stock T0 output.",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 5,
+          "text": "    {% set result.lane = reply.lane %}",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        },
+        {
+          "kind": "template_source",
+          "line": 6,
+          "text": "    {% set result.loaded_mm = reply.loaded_mm %}",
+          "column": 1,
+          "end_line": null,
+          "name": null,
+          "targets": null,
+          "body": [],
+          "region": "root"
+        }
+      ],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 8,
+      "text": "CLEAN_NOZZLE",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "wait",
+      "line": 9,
+      "text": "WAIT ON=filament_change",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": [
+        "filament_change"
+      ],
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 10,
+      "text": "{% set change = waited[0] %}",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    },
+    {
+      "kind": "template_source",
+      "line": 11,
+      "text": "M117 Loaded lane {change.lane}",
+      "column": 1,
+      "end_line": null,
+      "name": null,
+      "targets": null,
+      "body": [],
+      "region": "root"
+    }
+  ],
+  "diagnostics": []
+}
+
+STDERR:
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0memitWarning[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mwarnOnDeactivatedColors[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0mgetColorDepth[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0mshouldColorize[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0mrefresh[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0minternal:util/colors[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0minternal:assert/assertion_error[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mloadAssertionError[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 785, in warm_spreadsheet_runtime
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 720, in _warm_feature_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 704, in _warm_collaboration_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/generated/interface/models.py", line 32317, in hydrate_crdt_from_proto
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/remote.py", line 749, in __call__
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/client.py", line 150, in call
+artifact_tool.rpc.client.RemoteError: hydrateCrdtFromProto requires an empty collaborative document.
+
+
+$ python tools/demo_state.py
+Exit code: 0
+STDOUT:
+{"event": "synthetic-wait", "snapshot": {"schema_version": 1, "run_id": "demo-run", "revision": 6, "fault": null, "routines": [{"id": "demo-run:0", "name": "default", "state": "waiting", "command": "WAIT ON=filament_change,nozzle_heating", "source": {"source": "examples/toolchange.gcode", "line": 13}, "waiting_on": ["demo-run:1", "demo-run:2"], "detail": {}, "result": null, "error": null}, {"id": "demo-run:1", "name": "filament_change", "state": "running", "command": "T0", "source": {"source": "examples/toolchange.gcode", "line": 5}, "waiting_on": [], "detail": {"device": "mmu", "phase": "seeking_handoff"}, "result": null, "error": null}, {"id": "demo-run:2", "name": "nozzle_heating", "state": "running", "command": "M109 S220", "source": {"source": "examples/toolchange.gcode", "line": 9}, "waiting_on": [], "detail": {"device": "heater", "reason": "temperature"}, "result": null, "error": null}]}}
+{"event": "synthetic-heater-complete", "snapshot": {"schema_version": 1, "run_id": "demo-run", "revision": 7, "fault": null, "routines": [{"id": "demo-run:0", "name": "default", "state": "waiting", "command": "WAIT ON=filament_change,nozzle_heating", "source": {"source": "examples/toolchange.gcode", "line": 13}, "waiting_on": ["demo-run:1", "demo-run:2"], "detail": {}, "result": null, "error": null}, {"id": "demo-run:1", "name": "filament_change", "state": "running", "command": "T0", "source": {"source": "examples/toolchange.gcode", "line": 5}, "waiting_on": [], "detail": {"device": "mmu", "phase": "seeking_handoff"}, "result": null, "error": null}, {"id": "demo-run:2", "name": "nozzle_heating", "state": "completed", "command": "M109 S220", "source": {"source": "examples/toolchange.gcode", "line": 9}, "waiting_on": [], "detail": {"device": "heater", "reason": "temperature"}, "result": {}, "error": null}]}}
+{"event": "synthetic-resumed", "snapshot": {"schema_version": 1, "run_id": "demo-run", "revision": 8, "fault": null, "routines": [{"id": "demo-run:0", "name": "default", "state": "running", "command": "WAIT ON=filament_change,nozzle_heating", "source": {"source": "examples/toolchange.gcode", "line": 13}, "waiting_on": [], "detail": {}, "result": null, "error": null}, {"id": "demo-run:1", "name": "filament_change", "state": "completed", "command": "T0", "source": {"source": "examples/toolchange.gcode", "line": 5}, "waiting_on": [], "detail": {"device": "mmu", "phase": "seeking_handoff"}, "result": {"lane": 0, "loaded_mm": 684.5}, "error": null}, {"id": "demo-run:2", "name": "nozzle_heating", "state": "completed", "command": "M109 S220", "source": {"source": "examples/toolchange.gcode", "line": 9}, "waiting_on": [], "detail": {"device": "heater", "reason": "temperature"}, "result": {}, "error": null}]}}
+
+STDERR:
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0memitWarning[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mwarnOnDeactivatedColors[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0mgetColorDepth[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0mshouldColorize[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0mrefresh[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0minternal:util/colors[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0minternal:assert/assertion_error[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mloadAssertionError[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 785, in warm_spreadsheet_runtime
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 720, in _warm_feature_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 704, in _warm_collaboration_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/generated/interface/models.py", line 32317, in hydrate_crdt_from_proto
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/remote.py", line 749, in __call__
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/client.py", line 150, in call
+artifact_tool.rpc.client.RemoteError: hydrateCrdtFromProto requires an empty collaborative document.
+
+
+$ python tools/fetch_klipper.py --help
+Exit code: 0
+STDOUT:
+usage: fetch_klipper.py [-h] [--ref REF] [--dest DEST] [--manifest MANIFEST]
+
+Fetch a complete source tree at an explicit ref and record its resolved SHA.
+No installation or execution of fetched source. Ref defaults to master ONLY
+for initial selection; the output SHA is the reproducible integration target.
+Refuse to overwrite an existing destination. No fake pin on network failure.
+
+options:
+  -h, --help           show this help message and exit
+  --ref REF
+  --dest DEST
+  --manifest MANIFEST
+
+STDERR:
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0memitWarning[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mwarnOnDeactivatedColors[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0mgetColorDepth[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0mshouldColorize[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0mrefresh[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0minternal:util/colors[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0minternal:assert/assertion_error[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0manonymous[2m ([0m[0m[36munknown[0m[2m:[0m[33m1[0m[2m:[33m1[0m[2m)[0m
+[0m      [2mat [0mloadAssertionError[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 785, in warm_spreadsheet_runtime
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 720, in _warm_feature_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/spreadsheet_warmup.py", line 704, in _warm_collaboration_flows
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/generated/interface/models.py", line 32317, in hydrate_crdt_from_proto
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/remote.py", line 749, in __call__
+  File "/tmp/tmp.L2TH2Y5coc/artifact_tool_v2-2.8.22/artifact_tool/rpc/client.py", line 150, in call
+artifact_tool.rpc.client.RemoteError: hydrateCrdtFromProto requires an empty collaborative document.

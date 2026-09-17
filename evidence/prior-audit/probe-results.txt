@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.2, pluggy-1.6.0 -- /opt/pyvenv/bin/python3
+cachedir: .pytest_cache
+metadata: {'Python': '3.13.5', 'Platform': 'Linux-6.18.44-x86_64-with-glibc2.41', 'Packages': {'pytest': '9.0.2', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.13.0', 'ddtrace': '4.4.0', 'Faker': '40.1.2', 'asyncio': '1.3.0', 'cov': '7.0.0', 'json-report': '1.5.0', 'metadata': '3.1.1'}, 'PLATFORM': 'linux/amd64', 'CI': 'true'}
+rootdir: /mnt/data/gco-routines-audit/probes
+plugins: anyio-4.13.0, ddtrace-4.4.0, Faker-40.1.2, asyncio-1.3.0, cov-7.0.0, json-report-1.5.0, metadata-3.1.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 14 items
+
+test_feasibility.py::test_extended_parameters_preserve_case_and_comma_list PASSED [  7%]
+test_feasibility.py::test_original_dispatcher_discards_handler_return_value PASSED [ 14%]
+test_feasibility.py::test_unrecognized_control_command_does_not_abort_later_work PASSED [ 21%]
+test_feasibility.py::test_start_handler_alone_cannot_capture_following_commands PASSED [ 28%]
+test_feasibility.py::test_normal_child_entry_deadlocks_behind_waiting_parent_mutex PASSED [ 35%]
+test_feasibility.py::test_managed_child_bypass_allows_progress_and_preserves_external_lock PASSED [ 42%]
+test_feasibility.py::test_completion_can_wake_multiple_waiters_and_retain_result PASSED [ 50%]
+test_feasibility.py::test_independent_cooperative_commands_overlap_in_test_reactor PASSED [ 57%]
+test_feasibility.py::test_macro_recursion_flag_rejects_unrelated_concurrent_call PASSED [ 64%]
+test_feasibility.py::test_stock_render_reads_result_before_command_can_supply_it PASSED [ 71%]
+test_feasibility.py::test_generator_compiles_waited_lookup_before_barrier PASSED [ 78%]
+test_feasibility.py::test_dynamic_result_binding_can_bridge_barrier_in_simple_generator PASSED [ 85%]
+test_feasibility.py::test_generating_child_to_find_end_evaluates_child_statements_early PASSED [ 92%]
+test_feasibility.py::test_printer_status_wrapper_retains_old_snapshot PASSED [100%]
+
+============================== 14 passed in 0.08s ==============================
