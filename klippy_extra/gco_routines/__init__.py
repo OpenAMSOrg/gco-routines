@@ -99,10 +99,13 @@ class GcoRoutinesManager:
         stack = self._command_frames.setdefault(key, [])
         frame = {"gcmd": gcmd, "reply": {}}
         stack.append(frame)
-        routine = self.get_current_routine()
+        run, routine = self.get_bound_context()
+        frame["routine"] = routine
         if routine is not None:
             routine.reply = {}
             routine.command = getattr(gcmd, "get_commandline", lambda: None)()
+            routine.detail = None
+            run.revision += 1
         return (key, frame)
 
     def end_command_frame(self, token):
@@ -114,11 +117,11 @@ class GcoRoutinesManager:
             stack.pop()
         if not stack:
             self._command_frames.pop(key, None)
-        routine = self.get_current_routine()
-        mode = getattr(getattr(self, "adapter", None), "_mode", lambda: None)()
-        if routine is not None and stack and mode != "managed_literal":
-            # A nested command may not become the caller's implicit reply.
-            routine.reply = dict(stack[-1].get("reply", {}))
+        routine = frame.get("routine")
+        if routine is not None:
+            # Publish the command that just returned, not its last subcommand.
+            # This also handles managed helpers whose children had live replies.
+            routine.reply = dict(frame["reply"])
 
     def _current_frame(self, gcmd=None):
         try:
@@ -150,6 +153,18 @@ class GcoRoutinesManager:
                 and routine.state in ("running", "waiting")
                 for routine in active.routines.values()):
             raise ContractError("Cannot replace a run with active routines")
+        # Retain outcomes for the active job and a bounded recent history.
+        # A cancelled native handler may still be unwinding on a greenlet;
+        # never remove its context until that callback has returned.
+        for old_id, old_run in list(self.runs.items()):
+            if len(self.runs) < 64:
+                break
+            if (not old_run.greenlet_to_rid and all(
+                    r.state in ("completed", "cancelled", "failed")
+                    for r in old_run.routines.values())):
+                del self.runs[old_id]
+        if len(self.runs) >= 64:
+            raise self.gcode.error("Run retention limit exceeded")
         self._run_sequence += 1
         if run_id in self.runs:
             run_id = "%s_%d" % (run_id, self._run_sequence)
@@ -226,6 +241,7 @@ class GcoRoutinesManager:
         curr = self.get_current_routine()
         if curr:
             curr.detail = freeze(dict(fields))
+            self._run_for_routine(curr).revision += 1
 
     def dispatch_command_for_routine(self, routine: Routine, cmd_text: str):
         routine.command = cmd_text
@@ -235,6 +251,19 @@ class GcoRoutinesManager:
             raise ContractError("Cannot dispatch command: run is cancelled or faulted")
         with run.routine_context(routine):
             return self.adapter.dispatch_managed_line(cmd_text)
+
+    def check_execution(self, run, routine):
+        """Check at every command boundary, including called legacy macros."""
+        try:
+            run.check_active(routine.id)
+            if self.admissions_paused and routine.id != run.default_id:
+                raise ContractError("Routine command admission is paused")
+        except ContractError as exc:
+            raise self.gcode.error(str(exc))
+
+    def check_spawn(self):
+        if self.admissions_paused:
+            raise self.gcode.error("Routine admission is paused")
 
     def wait_for_routine(self, routine: Routine, targets: Optional[List[str]]):
         run = self._run_for_routine(routine)
@@ -248,9 +277,12 @@ class GcoRoutinesManager:
 
     def spawn_child_routine(self, run: Run, child_routine: Routine, child_tpl: Any, child_vars: dict):
         def _run_child(eventtime):
+            if run.fault is not None or child_routine.state != "running":
+                return self.reactor.NEVER
             child_g = greenlet.getcurrent()
             run.register_greenlet(child_g, child_routine.id)
             try:
+                self.check_execution(run, child_routine)
                 result = child_tpl.execute(self, child_vars, child_routine)
                 run.finish_routine(child_routine.id, result)
             except Exception as e:
@@ -273,6 +305,8 @@ class GcoRoutinesManager:
         child_routine.source = freeze(source) if source is not None else None
 
         def _run_commands(eventtime):
+            if run.fault is not None or child_routine.state != "running":
+                return self.reactor.NEVER
             child_g = greenlet.getcurrent()
             run.register_greenlet(child_g, child_routine.id)
             try:
@@ -323,7 +357,8 @@ class GcoRoutinesManager:
 
     def cancel_active_runs(self, message: str = "Run cancelled"):
         for run in self.runs.values():
-            run.cancel_run(message)
+            if any(r.state in ("running", "waiting") for r in run.routines.values()):
+                run.cancel_run(message)
 
     def set_paused(self, paused: bool):
         self.admissions_paused = bool(paused)

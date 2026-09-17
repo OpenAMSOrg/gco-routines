@@ -220,3 +220,21 @@ def test_single_fps_oams_config_templates_parse_and_tx_is_managed():
         if compiler.compile(source, filename=name) is not None:
             managed.append(name)
     assert managed == ["[gcode_macro _TX]"]
+
+
+def test_with_scope_dispatches_ordinary_commands():
+    runtime, _ = run('WAIT\n{% with value = 7 %}\nM117 {value}\n{% endwith %}')
+    assert runtime.events[-1] == ('run:0', 'M117 7')
+
+
+def test_child_namespace_is_a_private_snapshot():
+    runtime, _ = run(
+        "{% set local = namespace(value=1) %}\n"
+        "START\n{% set local.value = 2 %}\nEND\nWAIT\nM117 {local.value}")
+    assert runtime.events[-1] == ('run:0', 'M117 1')
+
+
+def test_inline_statement_cannot_dispatch_fragments_as_commands():
+    source = 'WAIT\nG1 X{% if enabled %}10{% else %}20{% endif %}'
+    with pytest.raises(OrderedTemplateError, match='separate command lines'):
+        run(source, {'enabled': True})

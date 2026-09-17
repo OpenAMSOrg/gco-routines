@@ -429,6 +429,11 @@ def _snapshot_plain(value):
         return type(value)(_snapshot_plain(v) for v in value)
     if isinstance(value, set):
         return {_snapshot_plain(v) for v in value}
+    if isinstance(value, jinja2.utils.Namespace):
+        return jinja2.utils.Namespace(**{
+            k: _snapshot_plain(v)
+            for k, v in value._Namespace__attrs.items()
+        })
     # Printer and helper objects are observations, not routine-local state.
     return value
 
@@ -563,6 +568,9 @@ class OrderedTemplate:
             return ""
 
         def start_child(name, child_index, local_values):
+            check_spawn = getattr(runtime, "check_spawn", None)
+            if check_spawn is not None:
+                check_spawn()
             child = self.children[int(child_index)]
             child_context = _copy_child_context(local_values, context_vars)
             child_context.pop("result", None)
@@ -617,7 +625,9 @@ class OrderedTemplate:
         # Iterating the generator is the key distinction from stock render():
         # each transformed Output node is consumed only after prior effects.
         for _ in self.template.generate(execution):
-            pass
+            check = getattr(runtime, "check_execution", None)
+            if check is not None:
+                check(run, caller_routine)
 
         data = _namespace_data(result)
         if caller_routine is not None and hasattr(caller_routine, "result"):
@@ -663,6 +673,29 @@ class OrderedTemplateCompiler:
             )
         if not any(node.kind == "routine" or node.kind == "wait" for node in report.nodes):
             return None
+
+        # Dispatch boundaries are complete physical command lines. Inline
+        # statements can otherwise split e.g. "G1 X{% if ... %}10{% endif %}"
+        # into several incomplete commands. Reject this unsupported form before
+        # any effect, while leaving legacy templates entirely unchanged.
+        statement_lines, output_lines = set(), set()
+        in_statement = False
+        for lineno, kind, value in self.env.lex(source):
+            if kind == "block_begin":
+                in_statement = True
+            if in_statement:
+                statement_lines.update(range(lineno, lineno + value.count('\n') + 1))
+            elif kind == "data":
+                output_lines.update(lineno + offset for offset, text in enumerate(value.split('\n')) if text.strip())
+            elif kind == "variable_begin":
+                output_lines.add(lineno)
+            if kind == "block_end":
+                in_statement = False
+        mixed = statement_lines & output_lines
+        if mixed:
+            raise OrderedTemplateError(
+                "Managed Jinja statements must occupy separate command lines "
+                "(line %d)" % min(mixed))
 
         try:
             tree = self.env.parse(source, name=filename)
@@ -718,6 +751,15 @@ class OrderedTemplateCompiler:
                     transformed.append(item)
                     index += 1
                     continue
+                if isinstance(item, (nodes.With, nodes.Scope)):
+                    item.body = transform(item.body)
+                    transformed.append(item)
+                    index += 1
+                    continue
+                if isinstance(item, (nodes.FilterBlock, nodes.CallBlock)):
+                    raise OrderedTemplateError(
+                        "Managed templates do not support output-producing "
+                        "filter/call blocks (line %s)" % item.lineno)
 
                 text = _static_output_text(item)
                 control = control_by_line.get(getattr(item, "lineno", -1)) if text is not None else None

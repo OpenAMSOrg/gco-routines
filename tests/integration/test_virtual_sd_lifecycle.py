@@ -277,3 +277,46 @@ def test_command_collision_preflight_fails_closed(klippy_env):
     with pytest.raises(Exception) as exc:
         gco_routines.load_config(cfg)
     assert "collides with an existing registration" in str(exc.value)
+
+
+@pytest.mark.parametrize('failure', [False, True])
+@pytest.mark.parametrize('explicit_wait', [False, True])
+def test_real_sd_worker_joins_children_and_runs_error_cleanup(klippy_env, tmp_path, failure, explicit_wait):
+    env = klippy_env
+    env.gcode.is_fileinput = False
+    env.printer.lookup_object('gcode_io').is_fileinput = False
+    events = []
+    def background(g):
+        env.reactor.pause(env.reactor.monotonic() + .01)
+        if failure:
+            raise g.error('background device failed')
+        events.append('background-done')
+    env.gcode.register_command('BACKGROUND', background)
+    env.gcode.register_command('CLEANUP', lambda g: events.append('cleanup'))
+    env.gcode.register_command('AFTER', lambda g: events.append('after'))
+    path = tmp_path / 'job.gcode'
+    path.write_text('START\nBACKGROUND\nEND\n' + ('WAIT\nAFTER\n' if explicit_wait else ''))
+    vsd = _virtual_sd(env, tmp_path)
+    # Attach the recovery template before re-installing the hooks.
+    env.manager.adapter._hooked_vsd.remove(id(vsd))
+    vsd.on_error_gcode = SimpleNamespace(render=lambda: 'CLEANUP')
+    env.manager.adapter._hook_virtual_sdcard(vsd)
+    vsd.print_stats.note_start = lambda: events.append('start')
+    vsd.print_stats.note_complete = lambda: events.append('complete')
+    vsd.print_stats.note_pause = lambda: events.append('paused')
+    vsd.print_stats.note_error = lambda error: events.append('error')
+    vsd.cmd_M23(_LoadCommand('job.gcode'))
+    vsd.work_timer = env.reactor.register_timer(vsd.work_handler, env.reactor.NOW)
+    def finished(t):
+        if vsd.work_timer is None:
+            env.reactor.end()
+            return env.reactor.NEVER
+        return t + .01
+    env.reactor.register_timer(finished, env.reactor.monotonic() + .05)
+    env.reactor.run()
+    if failure:
+        assert 'cleanup' in events
+        assert 'after' not in events and 'complete' not in events
+        assert events[-1] == 'error'
+    else:
+        assert events == ['start', 'background-done'] + (['after'] if explicit_wait else []) + ['complete']

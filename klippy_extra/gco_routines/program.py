@@ -110,11 +110,6 @@ class BlockCollector:
             raise ProgramError("Source line must be text")
         if line_num < 1:
             raise ProgramError("Source line numbers start at one")
-        if len(self.buffer) >= self.max_lines:
-            raise ProgramError("E_SOURCE_LIMIT: block exceeds line limit")
-        self._bytes += len(line.encode("utf-8"))
-        if self._bytes > self.max_bytes:
-            raise ProgramError("E_SOURCE_LIMIT: block exceeds byte limit")
         node = _control(line, line_num)
         if not self.collecting:
             if node is not None and node.kind == "start":
@@ -144,6 +139,11 @@ class BlockCollector:
             self.buffer = []
             self._bytes = 0
             return ("SPAWN", (block.name, list(block.body)))
+        if len(self.buffer) >= self.max_lines:
+            raise ProgramError("E_SOURCE_LIMIT: block exceeds line limit")
+        self._bytes += len(line.encode("utf-8")) + 1
+        if self._bytes > self.max_bytes:
+            raise ProgramError("E_SOURCE_LIMIT: block exceeds byte limit")
         self.buffer.append(line)
         return ("COLLECTING", None)
 

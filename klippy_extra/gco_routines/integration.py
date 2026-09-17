@@ -4,12 +4,16 @@ from __future__ import annotations
 import functools
 import hashlib
 import inspect
+import logging
 import os
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import greenlet
+from .program import parse_program
+from .templates import LiveGetStatusWrapper
 
 try:
     from .program import BlockCollector, preflight_file
@@ -79,6 +83,18 @@ except ImportError:  # standalone copied extra: no reference frontend required
 
 class CompatibilityError(RuntimeError):
     pass
+
+
+class _RecoveryScript(str):
+    """A script rendered by Klipper's configured virtual-SD error handler."""
+
+
+class _ErrorTemplate:
+    def __init__(self, original):
+        self.original = original
+
+    def render(self, *args, **kwargs):
+        return _RecoveryScript(self.original.render(*args, **kwargs))
 
 
 # c0c7ef2 contains the local CAN changes; ad425fc is the upstream pin.
@@ -220,12 +236,23 @@ class ManagedFileWrapper:
         if not data and not self._eof_joined:
             try:
                 self.collector.assert_closed()
-                self.runtime.finish_active_run()
+                run = self.runtime.runs.get(self.source_id)
+                if run is None:
+                    self.runtime.finish_active_run()
+                else:
+                    with self.runtime.default_context(run):
+                        self.runtime.finish_active_run()
             except Exception as e:
                 if self.printer is not None:
                     vsd = self.printer.lookup_object("virtual_sdcard", None)
                     if vsd is not None and hasattr(vsd, "print_stats"):
                         vsd.print_stats.note_error(str(e))
+                        template = getattr(vsd, "on_error_gcode", None)
+                        if template is not None:
+                            try:
+                                vsd.gcode.run_script(template.render())
+                            except Exception:
+                                logging.exception("gco-routines EOF error cleanup")
                 raise
             self._eof_joined = True
         return data
@@ -257,6 +284,7 @@ class IntegrationAdapter:
         self.compatibility = None
         self.installed = False
         self._source_modes = {}
+        self._recovery_depth = {}
         self._sd_sources: Dict[Tuple[Any, Any], _SourceState] = {}
         self._wrapped_handlers = set()
         self._orig_process_commands = None
@@ -264,6 +292,7 @@ class IntegrationAdapter:
         self._orig_run_script_from_command = None
         self._owner_mutex = None
         self._hooked_vsd = set()
+        self._sd_workers = set()
         self._hooked_pause = set()
         self._hooked_macros = set()
         self._macro_loader_hooked = set()
@@ -357,6 +386,9 @@ class IntegrationAdapter:
             end = getattr(self.runtime, "end_command_frame", None)
             frame = begin(gcmd) if callable(begin) else None
             try:
+                if gcmd.get_command() in ("PAUSE", "RESUME", "CLEAR_PAUSE", "CANCEL_PRINT", "M112"):
+                    with self._recovery_context():
+                        return handler(gcmd, *args, **kwargs)
                 return handler(gcmd, *args, **kwargs)
             finally:
                 if callable(end):
@@ -364,6 +396,20 @@ class IntegrationAdapter:
         wrapped._gco_frame_wrapper = True
         wrapped._gco_original = handler
         return wrapped
+
+    @contextmanager
+    def _recovery_context(self):
+        key = greenlet.getcurrent()
+        self._recovery_depth[key] = self._recovery_depth.get(key, 0) + 1
+        try:
+            yield
+        finally:
+            self._recovery_depth[key] -= 1
+            if not self._recovery_depth[key]:
+                del self._recovery_depth[key]
+
+    def _in_recovery(self):
+        return bool(self._recovery_depth.get(greenlet.getcurrent()))
 
     def _push_mode(self, mode):
         key = greenlet.getcurrent()
@@ -408,7 +454,9 @@ class IntegrationAdapter:
     def _is_sd_source(self):
         try:
             vsd = self.printer.lookup_object("virtual_sdcard", None)
-            return vsd is not None and bool(vsd.is_cmd_from_sd())
+            return (vsd is not None and bool(vsd.is_cmd_from_sd())
+                    and (id(vsd) not in self._hooked_vsd
+                         or greenlet.getcurrent() in self._sd_workers))
         except (AttributeError, TypeError):
             return False
 
@@ -431,6 +479,9 @@ class IntegrationAdapter:
         return _SourceState(BlockCollector())
 
     def _wrapped_run_script(self, script):
+        if isinstance(script, _RecoveryScript):
+            with self._recovery_context():
+                return self._orig_run_script(script)
         # VirtualSD calls run_script() once per physical source line. A public
         # API call supplies a complete source in one call. Calls made by a
         # command handler are internal and may not manufacture control lines.
@@ -440,15 +491,32 @@ class IntegrationAdapter:
             self._reserved_head(line) is not None
             for line in str(script).splitlines()
         )
-        if is_sd:
-            mode = "sd"
-            run = bound_run or self.runtime.get_current_run()
-        elif bound_run is not None:
+        if bound_run is not None:
             mode = "internal"
             run = bound_run
+        elif is_sd:
+            mode = "sd"
+            state = self._source_state(True)
+            run = self.runtime.runs[state.run_id]
         elif has_controls:
-            mode = "api"
-            run = self.runtime.start_run("api_run")
+            # Validate a complete submission before admitting its first effect.
+            # Wait for unrelated requests before creating/replacing a run.
+            try:
+                parse_program(script, source_id="api")
+            except ValueError as exc:
+                raise self.gcode.error(str(exc))
+            with self.gcode.get_mutex():
+                run = self.runtime.start_run("api_run")
+                with self.runtime.default_context(run) as routine:
+                    self._adopt_mutex_owner(run, routine)
+                    self._push_mode("api")
+                    try:
+                        return self._orig_run_script(script)
+                    except Exception as exc:
+                        run.cancel_run(str(exc))
+                        raise
+                    finally:
+                        self._pop_mode()
         else:
             mode = "ordinary_api"
             run = None
@@ -505,13 +573,31 @@ class IntegrationAdapter:
         gcode_io = self.printer.lookup_object("gcode_io", None)
         is_file_input = bool(getattr(gcode_io, "is_fileinput", False))
         mode = self._mode()
+        if self._in_recovery():
+            if any(self._reserved_head(line) is not None for line in commands):
+                raise self.gcode.error("Recovery scripts cannot start managed routines")
+            return self._orig_process_commands(commands, need_ack=need_ack)
+
+        def dispatch_checked(lines):
+            result = None
+            for line in lines:
+                run, routine = self._bound_context()
+                if routine is not None:
+                    self.runtime.check_execution(run, routine)
+                try:
+                    result = self._orig_process_commands([line], need_ack=need_ack)
+                except Exception as exc:
+                    if run is not None:
+                        run.fail_routine(routine.id, str(exc))
+                    raise
+            return result
 
         if mode == "internal":
             if any(self._reserved_head(line) is not None for line in commands):
                 raise self.gcode.error(
                     "E_GENERATED_CONTROL: legacy/internal rendering may not "
                     "generate START, END, or WAIT")
-            return self._orig_process_commands(commands, need_ack=need_ack)
+            return dispatch_checked(commands)
 
         if mode == "ordinary_api":
             return self._orig_process_commands(commands, need_ack=need_ack)
@@ -522,7 +608,9 @@ class IntegrationAdapter:
             # preserved for serial/PTY ingress.
             return self._orig_process_commands(commands, need_ack=need_ack)
 
-        persistent = is_sd or is_file_input
+        # Child/compiler lines are never physical SD input, even while the
+        # virtual-SD caller is suspended with its cmd_from_sd flag set.
+        persistent = mode == "sd" or (mode == "interactive" and (is_sd or is_file_input))
         source_name = "sd" if is_sd else "file_input"
         state = self._source_state(persistent, source_name)
         run, routine = self._bound_context()
@@ -536,26 +624,29 @@ class IntegrationAdapter:
         def process_in_order():
             result = None
             for line in commands:
+                self.runtime.check_execution(run, routine or run.get_routine(run.default_id))
                 state.line_number += 1
                 passthrough = self._dispatch_control(state, line)
                 if passthrough is not None:
                     # Do not accumulate ordinary lines: a following WAIT must
                     # observe the command and any cooperative yields before it.
-                    result = self._orig_process_commands(
-                        [passthrough], need_ack=need_ack)
+                    result = dispatch_checked([passthrough])
             if not persistent:
                 state.collector.assert_closed()
             if mode == "api":
                 self.runtime.finish_active_run()
             return result
 
-        if routine is not None:
-            return process_in_order()
-        with self.runtime.default_context(run) as routine:
-            # GCodeIO acquires the mutex before calling _process_commands().
-            # Adopt that already-held lock now that its run identity is known.
-            self._adopt_mutex_owner(run, routine)
-            return process_in_order()
+        try:
+            if routine is not None:
+                return process_in_order()
+            with self.runtime.default_context(run) as routine:
+                # GCodeIO acquires the mutex before _process_commands().
+                self._adopt_mutex_owner(run, routine)
+                return process_in_order()
+        except Exception as exc:
+            run.fail_routine((routine.id if routine else run.default_id), str(exc))
+            raise self.gcode.error(str(exc))
 
     def _hook_virtual_sdcard(self, vsd):
         if vsd is None or id(vsd) in self._hooked_vsd:
@@ -599,7 +690,42 @@ class IntegrationAdapter:
                 self._sd_sources[(id(vsd), id(wrapped))] = state
             return result
         vsd._load_file = load_file
+        error_template = getattr(vsd, "on_error_gcode", None)
+        if error_template is not None:
+            vsd.on_error_gcode = _ErrorTemplate(error_template)
         self._hooked_vsd.add(id(vsd))
+        original_work = getattr(vsd, "work_handler", None)
+        if callable(original_work):
+            @functools.wraps(original_work)
+            def work_handler(eventtime):
+                worker = greenlet.getcurrent()
+                self._sd_workers.add(worker)
+                source = self._source_state(True)
+                run = self.runtime.runs.get(source.run_id)
+                saved_stats = {}
+                for name in ("note_complete", "note_pause"):
+                    original_note = getattr(vsd.print_stats, name, None)
+                    if original_note is None:
+                        continue
+                    saved_stats[name] = original_note
+                    def note(*args, _note=original_note, **kwargs):
+                        if run is not None and run.fault:
+                            if not run.is_cancelled:
+                                vsd.print_stats.note_error(run.fault)
+                            return
+                        return _note(*args, **kwargs)
+                    setattr(vsd.print_stats, name, note)
+                try:
+                    return original_work(eventtime)
+                finally:
+                    for name, original_note in saved_stats.items():
+                        setattr(vsd.print_stats, name, original_note)
+                    self._sd_workers.discard(worker)
+                    # Klipper catches read errors and subsequently note_pause()
+                    # overwrites note_error(). Publish the run failure last.
+                    if run is not None and run.fault and not run.is_cancelled:
+                        vsd.print_stats.note_error(run.fault)
+            vsd.work_handler = work_handler
         reset = getattr(vsd, "_reset_file", None)
         if callable(reset):
             @functools.wraps(reset)
@@ -718,6 +844,10 @@ class IntegrationAdapter:
         def macro_cmd(obj, gcmd):
             manager = obj.printer.lookup_object("gco_routines", None)
             runner = getattr(getattr(obj, "template", None), "gco_runner", None)
+            if manager is not None and manager.adapter._in_recovery():
+                if runner is not None:
+                    raise manager.gcode.error("Recovery macros cannot start managed routines")
+                return original_cmd(obj, gcmd)
             if manager is None or (runner is None and
                                    manager.get_bound_context()[1] is None):
                 return original_cmd(obj, gcmd)
@@ -740,6 +870,11 @@ class IntegrationAdapter:
                 params["params"] = gcmd.get_command_parameters()
                 params["rawparams"] = gcmd.get_raw_command_parameters()
                 if runner is not None:
+                    if runner.children and routine.id != run.default_id:
+                        raise manager.gcode.error(
+                            "Nested spawning is not permitted in v0.2; "
+                            "macro %s owns background routines" % obj.alias)
+                    params["printer"] = LiveGetStatusWrapper(obj.printer)
                     result = runner.execute(manager, params, routine)
                 else:
                     # Preserve stock whole-template rendering for legacy
@@ -752,7 +887,7 @@ class IntegrationAdapter:
             except Exception as exc:
                 if owns_run:
                     run.cancel_run(str(exc))
-                raise
+                raise manager.gcode.error(str(exc))
             finally:
                 manager.recursion_tracker.exit(routine.id, obj.alias)
                 if context is not None:

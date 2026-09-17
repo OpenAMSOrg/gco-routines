@@ -513,7 +513,7 @@ class Run:
                     "id": r.id, "name": r.name, "state": r.state,
                     "command": r.command, "source": detached(r.source),
                     "waiting_on": list(r.targets), "detail": detached(r.detail),
-                    "result": thaw(r.result), "error": r.error,
+                    "result": detached(r.result), "error": r.error,
                 } for r in self.routines.values()]}
 
     get_status = snapshot
