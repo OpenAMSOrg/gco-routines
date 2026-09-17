@@ -25,16 +25,17 @@ The implementation is validated locally against:
 - current upstream pin
   `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
 - real `SelectReactor` integration tests running locally on
-  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **242 tests passed**;
+  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **243 tests passed**;
 - the Pi's actual Python 3.9.2/Jinja 3.1.6/greenlet 2.0.2 environment,
   using real Klippy and the OAMS macro file with inert hardware handlers.
 
 The extra and single-FPS macros are installed on the Pi following explicit
-deployment authorization. Live hardware validation is blocked by the existing
-`mcu 'oams_mcu1': Unable to connect` error; no motion, heating, or filament
-operations were requested during review. The attempted upstream merge was
-performed only in a temporary local clone and was withheld because it conflicts
-with the Pi's CAN changes in `klippy/msgproto.py`.
+deployment authorization. The OAMS MCU is now connected and Klipper is ready;
+a live no-motion `START`/`WAIT` probe and the cold/unhomed toolchange rejection
+both passed without changing printer or OAMS state. Physical loading, cutting,
+and motion remain untested. The attempted upstream merge was performed only in
+a temporary local clone and was withheld because it conflicts with the Pi's CAN
+changes in `klippy/msgproto.py`.
 
 Review findings, verification, and rollback locations are recorded in
 [the review report](evidence/review-2026-09-17.md).
@@ -145,6 +146,11 @@ and cannot be placed inside another `START`. The printer must already be homed,
 hot enough to extrude, and unpaused. Optional inlet/outlet checks remain disabled
 until their corresponding switches are configured. Software tests do not validate
 cutter geometry, filament tuning, or physical transport success.
+
+The macro's default minimum toolchange temperature is 170 C, independently of
+Klipper's `min_extrude_temp`. Adjust
+`variable_minimum_extrude_temperature` only for a material with a known safe
+cut/retract temperature.
 
 ## Development and verification
 

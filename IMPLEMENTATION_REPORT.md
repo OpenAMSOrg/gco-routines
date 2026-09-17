@@ -12,7 +12,9 @@ After initial read-only development, the user explicitly authorized deployment.
 The extra and single-FPS `oams_macros.cfg` are now installed on the target Pi;
 the review corrections were deployed with backups and a Klipper service restart.
 No motion, heater, or OAMS transport commands were requested during review.
-Hardware validation remains blocked by the existing missing OAMS CAN MCU.
+The OAMS CAN MCU later returned, Klipper reached ready, and no-motion live
+scheduler and rejection checks passed. Physical workflow validation remains
+outstanding.
 
 ## Baselines
 
@@ -100,7 +102,7 @@ Verification command:
 .venv/bin/pytest -q
 ```
 
-Final recorded result after review: **242 passed in 2.38s**.
+Final recorded result after live follow-up: **243 passed in 2.51s**.
 
 Review regressions additionally cover live macro status refresh, stop-on-failure
 inside legacy helpers, cancelled queued template actions, complete API preflight
@@ -121,9 +123,11 @@ tracked Klipper state remained clean.
 
 ## Operational limits
 
-- Physical workflows were not exercised. The service currently cannot connect
-  `oams_mcu1` (CAN UUID `66e4a3d0cd57`); the same error occurred with the original
-  configuration. Real-printer workflow validation remains outstanding.
+- Physical workflows were not exercised. `oams_mcu1` (CAN UUID
+  `66e4a3d0cd57`) is connected and producing telemetry, but RFID reader B fails
+  its SPI reset and the proprietary firmware's `tx_retries` counter increases
+  rapidly despite zero RX/TX errors. Supervised physical validation remains
+  outstanding.
 - The plugin coordinates host command execution; it does not create independent
   motion planners or hardware ownership. Authors must synchronize shared
   hardware explicitly.
