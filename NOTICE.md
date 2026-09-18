@@ -1,10 +1,15 @@
 # Notice
 
-This is a development handoff, not printer-ready firmware. No commands in its examples
-were sent to real hardware. It includes reference code and proposed language contracts.
+The original gco-routines code and documentation are published under the MIT
+License; see `LICENSE`. This repository includes a Klipper extra, reference tools,
+tests, and development/deployment evidence. See `README.md` for the tested
+baselines, operational limits, and distinction between simulated and hardware tests.
 
-No project-wide publication license has been selected in this handoff. Choose one
-before publishing the new project. Prior audit excerpts retain their original
-attribution and `evidence/prior-audit/COPYING`; do not treat those excerpts as newly
-licensed original project code. A future vendored Klipper checkout retains its own
-license and must not be redistributed without the corresponding notices/source.
+Third-party material is not relicensed by the project's MIT License:
+
+- The Klipper source excerpts in `evidence/prior-audit/probes/upstream_excerpts.py`
+  retain their original attribution and GNU GPLv3 license, reproduced in
+  `evidence/prior-audit/COPYING`.
+- Locally fetched Klipper checkouts under `vendor/` retain their own license and
+  notices. They are excluded from this repository and are not included in the
+  gco-routines Python package.

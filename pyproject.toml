@@ -7,6 +7,7 @@ name = "gco-routines-reference"
 version = "0.2.0"
 description = "Validation frontend and semantic reference for a proposed Klipper extra; not a printer runtime"
 requires-python = ">=3.9"
+license = {file = "LICENSE"}
 
 [project.optional-dependencies]
 template = ["Jinja2>=2.11.3,<4"]

@@ -2,6 +2,9 @@
 
 Source repository: [OpenAMSOrg/gco-routines](https://github.com/OpenAMSOrg/gco-routines).
 
+Original project code is [MIT licensed](LICENSE). Retained third-party audit
+excerpts have their own licenses; see [NOTICE.md](NOTICE.md).
+
 `gco-routines` is an extras-only Klipper extension that adds three literal
 control instructions without changing tracked Klipper source or MCU firmware:
 
