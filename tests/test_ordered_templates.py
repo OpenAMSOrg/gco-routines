@@ -197,7 +197,7 @@ def test_rendered_embedded_controls_are_rejected_before_dispatch():
         )
 
 
-def test_single_fps_oams_config_templates_parse_and_tx_is_managed():
+def test_single_fps_oams_config_templates_parse_and_tx_can_be_ordered():
     path = Path(__file__).parents[1] / "config" / "oams_macros.cfg"
     sections = []
     name = None
@@ -214,12 +214,10 @@ def test_single_fps_oams_config_templates_parse_and_tx_is_managed():
             body.append(line[4:] if line.startswith("    ") else line)
 
     compiler = OrderedTemplateCompiler(env())
-    managed = []
     for name, source in sections:
         compiler.env.parse(source)
-        if compiler.compile(source, filename=name) is not None:
-            managed.append(name)
-    assert managed == ["[gcode_macro _TX]"]
+    tx = dict(sections)['[gcode_macro _TX]']
+    assert len(compiler.compile(tx, filename='[gcode_macro _TX]').children) == 1
 
 
 def test_with_scope_dispatches_ordinary_commands():
@@ -238,3 +236,16 @@ def test_inline_statement_cannot_dispatch_fragments_as_commands():
     source = 'WAIT\nG1 X{% if enabled %}10{% else %}20{% endif %}'
     with pytest.raises(OrderedTemplateError, match='separate command lines'):
         run(source, {'enabled': True})
+
+
+def test_standalone_ordered_compiler_needs_no_controls(monkeypatch):
+    real_import = builtins.__import__
+    def without_reference(name, *args, **kwargs):
+        if name == 'gcoroutines.frontend':
+            raise ImportError('standalone extra')
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', without_reference)
+    runtime, _ = run('T1\nM117 {reply.lane}')
+    assert runtime.events == [('run:0', 'T1'), ('run:0', 'M117 1')]
+    with pytest.raises(OrderedTemplateError, match='E_TEMPLATE_COMPOSITION'):
+        run('{% include "external.jinja" %}')

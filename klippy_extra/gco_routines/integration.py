@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import greenlet
 from .program import parse_program
-from .templates import LiveGetStatusWrapper
+from .templates import LiveGetStatusWrapper, OrderedTemplateError
 
 try:
     from .program import BlockCollector, preflight_file
@@ -596,7 +596,8 @@ class IntegrationAdapter:
             if any(self._reserved_head(line) is not None for line in commands):
                 raise self.gcode.error(
                     "E_GENERATED_CONTROL: legacy/internal rendering may not "
-                    "generate START, END, or WAIT")
+                    "generate START, END, or WAIT; macros using literal "
+                    "controls must declare render_mode: ordered")
             return dispatch_checked(commands)
 
         if mode == "ordinary_api":
@@ -822,10 +823,24 @@ class IntegrationAdapter:
                     source = config.get(option)
                 else:
                     source = config.get(option, default)
+                mode = config.get("render_mode", "legacy")
+                if mode not in ("legacy", "ordered"):
+                    raise config.error(
+                        "Option 'render_mode' in section '%s' must be "
+                        "'legacy' or 'ordered'" % config.get_name())
                 template = original_load(config, option, default)
                 name = "%s:%s" % (config.get_name(), option)
                 template.gco_source = source
-                template.gco_runner = compiler.compile(source, filename=name)
+                template.gco_render_mode = mode
+                template.gco_runner = None
+                # Selection belongs to the macro configuration, never to its
+                # source text or caller. Do not parse legacy templates with
+                # the managed frontend (even if they contain control text).
+                if mode == "ordered":
+                    try:
+                        template.gco_runner = compiler.compile(source, filename=name)
+                    except OrderedTemplateError as exc:
+                        raise config.error("%s: %s" % (name, exc)) from exc
                 return template
             macro_manager.load_template = load_template
             self._macro_loader_hooked.add(id(macro_manager))

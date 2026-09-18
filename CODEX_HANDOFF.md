@@ -106,8 +106,12 @@ M117 Lane {waited[0].lane}
 Parse raw macro source during configuration. Validate literal boundaries before
 rendering. Separate background bodies before they evaluate. Compile managed macros
 into resumable execution using Jinja's parser/expression/scoping machinery where
-possible; command dispatch and WAIT remain native effects. Templates without literal
-controls must keep the current render-entire-template-then-execute behavior.
+possible; command dispatch and WAIT remain native effects. Macro configuration
+must explicitly select `render_mode: ordered`; absent that property (or with
+`render_mode: legacy`), preserve render-entire-template-then-execute behavior.
+Do not infer rendering mode from literal controls or inherit it from callers.
+Ordered macros need not contain concurrency controls. This explicit opt-in
+supersedes the original Draft 0.2 control-presence selection rule.
 
 A stock render(), render_async(), generate(), or a loop over from_string(line) is
 not a compliant compiler. The prior probes explain premature body evaluation,

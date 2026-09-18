@@ -102,8 +102,8 @@ Verification command:
 .venv/bin/pytest -q
 ```
 
-Final recorded result after the upstream serial-fallback work: **246 passed in
-2.88s**.
+Final recorded result after correcting live capability detection: **248 passed
+in 4.09s**.
 
 Review regressions additionally cover live macro status refresh, stop-on-failure
 inside legacy helpers, cancelled queued template actions, complete API preflight
@@ -115,6 +115,11 @@ invalid groups, cold extrusion prevention, and nested-toolchange rejection.
 They also run the same OAMS macro file against a real stock Klippy harness with
 no gco-routines manager or reserved commands registered, proving that it emits a
 serial load/clean sequence and rechecks a failed load before permitting extrusion.
+The OAMS fixture now uses Klipper's actual configuration status builder: an empty
+`[gco_routines]` section is absent from `settings`, but the live plugin object
+must still select concurrency. A regression reproduced the original one-routine
+serial run and now verifies two routines and overlap. A separate test models a
+non-yielding cleaning macro followed by a yielding motion-completion barrier.
 
 The Pi smoke passed repeated toolchanges, load/clean overlap, and a deliberate
 sensor abort on Python 3.9.2. Its expected abort logs a Klipper command-error
@@ -125,13 +130,91 @@ The local installer was also run against the target checkout clone, the package
 was imported through `extras.gco_routines`, and the symlink was removed again;
 tracked Klipper state remained clean.
 
+### Staged printer acceptance suite
+
+`printer_tests/` now supplies an optional hardware-free diagnostic extra,
+32 API acceptance cases, structured JSON reporting through
+`tools/run_printer_tests.py`, four virtual-SD fixtures, and a supervised lifecycle
+checklist. Separate hardware macros cover motion/M400, native M109, and a
+**bay 1 / T1 only** load-unload-load sequence; another loaded bay is rejected.
+None of these fixtures was installed or run on the physical printer in this
+preparation step. Production extra code and upstream Klipper were not changed.
+
+The exact macro/case sources and file fixtures passed in the pinned real-Klippy
+environment with inert hardware. Full local result: **315 passed in 34.09s**.
+This includes client preflight/report tests, T1 guard/abort tests, expected-error
+recovery without restarting, and actual virtual-SD worker execution. Details and
+limits are in `evidence/printer-acceptance-2026-09-18.md`.
+
+### Explicit per-macro render mode (initial local verification)
+
+At the user's request, `render_mode: ordered` is now a real macro configuration
+property, not a macro variable. Omitted or `legacy` preserves whole-template
+rendering; control text and caller mode no longer select incremental execution.
+The ordered compiler also accepts macros without START/END/WAIT. Both modes
+retain invocation-time ordinary variables; fresh `printer` reads see prior
+commands' effects only in ordered mode. The property is not changeable with
+SET_GCODE_VARIABLE. Invalid values fail configuration.
+
+The extra alone consumes the property. No tracked Klipper file changed.
+Stock Klipper rejects unknown macro properties, so the portable OAMS base
+config remains property-free. `config/oams_macros_ordered.cfg` explicitly opts
+only `_TX` in; its absence selects serial fallback even with the plugin loaded.
+The plugin, base macro update and ordered overlay must be deployed together for
+the concurrent workflow. The diagnostic managed macros now declare their mode.
+
+New real-Klippy regressions cover status/action timing versus stock behavior,
+both directions of mixed-mode calls, background helpers, ordinary scopes,
+configuration option consumption, invalid modes, immutable mode selection,
+legacy control rejection, control-free error propagation and ordered restrictions.
+The standalone compiler fallback is also tested without the reference frontend.
+Full local result: **347 passed in 35.09s** (`.venv/bin/pytest -q`); the focused
+render-mode integration file also passed alone (**30 passed in 0.82s**).
+Both pinned checkouts passed the updated
+inert-device OAMS smoke, including overlap and the expected sensor abort. These
+results do not establish physical-printer or Pi Python 3.9 acceptance for this
+revision; no printer commands, installation or restart were performed.
+All six plugin modules also parsed using Python 3.9's syntax rules; both vendor
+checkouts have no tracked diff, and `git diff --check` passed.
+
+Local smoke commands (both exited zero; expected sensor-abort logs are checked):
+
+```bash
+.venv/bin/python tools/smoke_klipper.py --klipper vendor/klipper --extra-parent klippy_extra --macros config/oams_macros.cfg
+.venv/bin/python tools/smoke_klipper.py --klipper vendor/klipper-upstream --extra-parent klippy_extra --macros config/oams_macros.cfg
+```
+
+### Authorized render-mode deployment
+
+After the user authorized deployment and restart, the same sources passed the
+inert smoke in the Pi's actual Python 3.9.2 environment, then were installed with
+backups and a Klipper service restart. Live configuration confirms `_TX` ordered
+and the other 56 macros legacy. Klipper is ready; a no-motion START/G4/END/WAIT
+probe completed both routines without fault. T1 remains selected and heater
+targets are zero. No physical workflow or full acceptance suite was run.
+
+No tracked Klipper files changed. The pre-existing RFID-B reset warning remains.
+Hashes, checks and rollback are recorded in
+[deployment evidence](evidence/render-mode-deployment-2026-09-18.md).
+
 ## Operational limits
 
-- Physical workflows were not exercised. `oams_mcu1` (CAN UUID
-  `66e4a3d0cd57`) is connected and producing telemetry, but RFID reader B fails
-  its SPI reset and the proprietary firmware's `tx_retries` counter increases
-  rapidly despite zero RX/TX errors. Supervised physical validation remains
-  outstanding.
+- After the FPS hardware fix, the initial T2 load, T2-to-T3 and T3-to-T2
+  toolchanges, same-tool no-op, and standalone unload completed on the printer.
+  Live telemetry confirms load/clean overlap, subsequent extrusion, and no
+  pauses or routine faults. T0 subsequently became available and its initial
+  concurrent load passed. Its next unload returned firmware busy after T0
+  sensor-event chatter; the macro correctly blocked the T2 reload and paused.
+  The heater was turned off with T0 still in the path. Firmware mislabels hub
+  events as inlet events, so the trace does not isolate the affected sensor.
+  A user-authorized unload retry retracted to encoder 15 before the low-speed
+  monitor stopped it; the hub subsequently cleared and a state refresh reports
+  group/spool null, heater off, and pause retained. This was recovery, not a
+  clean firmware unload-success response.
+  T1, a complete T0 roundtrip, and long-print endurance remain outstanding.
+  Previously observed RFID reader B reset errors and the proprietary firmware's
+  increasing `tx_retries` counter are separate diagnostics; this test does not
+  establish that they are resolved.
 - The plugin coordinates host command execution; it does not create independent
   motion planners or hardware ownership. Authors must synchronize shared
   hardware explicitly.

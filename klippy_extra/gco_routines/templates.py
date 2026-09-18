@@ -1,8 +1,9 @@
 """Ordered Jinja templates for managed gco-routines macros.
 
 This module deliberately keeps the ordinary Klipper macro path out of the
-managed compiler.  A template opts in only when the source contains literal
-``START``/``END``/``WAIT`` controls.  The Jinja AST is compiled once and then
+managed compiler. The adapter calls this compiler only for macros explicitly
+configured with ``render_mode: ordered``, with or without concurrency controls.
+The Jinja AST is compiled once and then
 consumed through ``Template.generate``; each generated output line is a
 dispatch boundary.  Consequently assignments, branches, loops, and ordinary
 Jinja expressions are evaluated in source order even when a callback yields.
@@ -662,7 +663,8 @@ class OrderedTemplateCompiler:
             # filters, globals, and tests while changing only Undefined.
             self.env = env.overlay(undefined=jinja2.StrictUndefined)
 
-    def compile(self, source: str, filename: str = "<macro>") -> Optional[OrderedTemplate]:
+    def compile(self, source: str, filename: str = "<macro>") -> OrderedTemplate:
+        """Compile an explicitly selected ordered source, even without controls."""
         parse, _unused_guard = _frontend_api()
         report = parse(source, filename=filename, template=True)
         if not report.ok:
@@ -671,9 +673,6 @@ class OrderedTemplateCompiler:
                 "Macro syntax error [%s] at line %s: %s"
                 % (diagnostic.code, diagnostic.line, diagnostic.message)
             )
-        if not any(node.kind == "routine" or node.kind == "wait" for node in report.nodes):
-            return None
-
         # Dispatch boundaries are complete physical command lines. Inline
         # statements can otherwise split e.g. "G1 X{% if ... %}10{% endif %}"
         # into several incomplete commands. Reject this unsupported form before
@@ -701,6 +700,15 @@ class OrderedTemplateCompiler:
             tree = self.env.parse(source, name=filename)
         except Exception as exc:
             raise OrderedTemplateError("Jinja syntax error: %s" % exc) from exc
+
+        # The structural frontend checks composition when it finds controls.
+        # Ordered macros without controls need the same restriction: external
+        # templates have not been transformed into command dispatch boundaries.
+        for item in tree.find_all((nodes.Include, nodes.Import,
+                                   nodes.FromImport, nodes.Extends)):
+            raise OrderedTemplateError(
+                "E_TEMPLATE_COMPOSITION: managed templates may not include, "
+                "import or extend templates (line %s)" % item.lineno)
 
         control_by_line = {}
 

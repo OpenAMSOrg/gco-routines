@@ -16,6 +16,8 @@ def main():
     parser.add_argument('--klipper', type=Path, required=True)
     parser.add_argument('--extra-parent', type=Path, required=True)
     parser.add_argument('--macros', type=Path, required=True)
+    parser.add_argument('--ordered-config', type=Path,
+                        help='Opt-in overlay (default: oams_macros_ordered.cfg beside --macros)')
     args = parser.parse_args()
     sys.path[:0] = [str(args.extra_parent.resolve()),
                     str(args.klipper.resolve() / 'klippy')]
@@ -41,18 +43,25 @@ def main():
     gcode.is_fileinput = False
     printer.lookup_object('gcode_io').is_fileinput = False
     printer.send_event('klippy:ready')
-    data = configfile.ConfigFileReader().build_fileconfig(
+    reader = configfile.ConfigFileReader()
+    data = reader.build_fileconfig(
         args.macros.read_text(), str(args.macros))
+    overlay = args.ordered_config or args.macros.with_name('oams_macros_ordered.cfg')
+    reader.append_fileconfig(data, overlay.read_text(), str(overlay))
+    validation = configfile.ConfigValidate(printer)
     for section in data.sections():
-        cfg = configfile.ConfigWrapper(printer, data, {}, section)
+        cfg = configfile.ConfigWrapper(printer, data, validation.access_tracking, section)
         printer.add_object(section, gcode_macro.GCodeMacro(cfg))
+    validation.check_unused(data)
+    settings = dict(validation.status_settings)
+    settings.update({'filament_group t%d' % i: {} for i in range(4)})
     statuses = {
         'oams_manager': {'current_group': 'T0'},
         'toolhead': {'homed_axes': 'xyz'},
         'extruder': {'can_extrude': True, 'temperature': 220.0},
         'pause_resume': {'is_paused': False},
         'exclude_object': {'current_object': '', 'excluded_objects': []},
-        'configfile': {'settings': {'filament_group t%d' % i: {} for i in range(4)}},
+        'configfile': {'settings': settings},
         'filament_switch_sensor extruder_in': {'filament_detected': True},
         'filament_switch_sensor extruder_out': {'filament_detected': False},
     }

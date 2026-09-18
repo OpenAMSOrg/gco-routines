@@ -162,9 +162,41 @@ rejects framed extension commands with E_TRANSPORT; it does not alter framed leg
 lines. Unframed file G-code is the first implementation target. Pseudo-TTY streaming
 requires explicit run/source ownership and is not silently supported by inference.
 
-Legacy macros without literal controls retain full-template rendering. A legacy
-macro called from a routine retains its rendering mode and executes in that routine;
-managed recursion detection is per routine, not a globally disabled guard.
+Macro timing is selected explicitly by a configuration property:
+
+```ini
+[gcode_macro EXAMPLE]
+render_mode: ordered
+variable_value: 0
+gcode:
+    SET_GCODE_VARIABLE MACRO=EXAMPLE VARIABLE=value VALUE=1
+    M117 {printer['gcode_macro EXAMPLE'].value}
+```
+
+The default is `render_mode: legacy`: render the entire template, then execute
+its commands, exactly as stock Klipper does. Only `render_mode: ordered` selects
+incremental evaluation/dispatch, even when the macro has no START/END/WAIT.
+Only these two values are accepted. This is a macro configuration property,
+not a `variable_` option; it is fixed at configuration load, not changeable via
+SET_GCODE_VARIABLE. Literal controls alone no longer select ordered execution.
+This explicitly supersedes Draft 0.2's implicit control-presence opt-in.
+
+A called macro retains its own mode, whether its caller is legacy, ordered, or
+a background routine. Managed recursion detection is per routine, not a globally
+disabled guard. Legacy output containing START/END/WAIT remains rejected before
+command dispatch, with an explicit-opt-in hint; it is not silently reinterpreted.
+Legacy Jinja actions still happen while rendering, before dispatch validation.
+
+Ordered evaluation follows source command boundaries, not physical motion
+completion. Ordinary `if`/`for` scopes and captured values retain Jinja meaning;
+a saved local is not a live reference. Use fresh `printer` lookups after commands
+and the host's completion barriers (for example M400) where needed. Opaque captured
+strings are rendered as strings, not independently compiled line-by-line programs.
+
+The extra consumes the new property without modifying tracked Klipper code.
+Stock Klipper rejects unknown properties, so omit `render_mode` without the
+extension. Portable workflows should put the opt-in in an extension-only config
+overlay and guard their concurrent branch; the supplied OAMS configs do this.
 
 ## 5. Observability contract clarification
 

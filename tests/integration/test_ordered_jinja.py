@@ -9,10 +9,11 @@ from extras import gcode_macro
 
 
 class MacroConfig:
-    def __init__(self, printer, name, source):
+    def __init__(self, printer, name, source, render_mode=None):
         self.printer = printer
         self.name = name
         self.source = source
+        self.render_mode = render_mode
 
     def get_printer(self):
         return self.printer
@@ -23,6 +24,8 @@ class MacroConfig:
     def get(self, option, default=None):
         if option == "gcode":
             return self.source
+        if option == "render_mode" and self.render_mode is not None:
+            return self.render_mode
         return default
 
     def get_prefix_options(self, prefix):
@@ -52,6 +55,7 @@ def test_real_macro_hook_captures_source_and_runs_managed(klippy_env):
         "START NAME=job\nBACKGROUND\n"
         "{% set result.value = reply.value %}\nEND\n"
         "FOREGROUND\nWAIT ON=job\nSHOW VALUE={waited[0].value}",
+        render_mode="ordered",
     ))
     env.printer.add_object("gcode_macro MANAGED_TEST", macro)
     assert macro.template.gco_source.startswith("START")
@@ -248,8 +252,8 @@ M117 {params.INJECTED}
     assert "E_GENERATED_CONTROL" in str(error[0])
 
 
-def test_legacy_macro_preserves_full_rendering(klippy_env):
-    """Verify macros without literal controls return None from compiler (staying on legacy path)."""
+def test_ordered_compiler_accepts_source_without_controls():
+    """The adapter selects the mode; the compiler no longer infers it."""
     jinja_env = jinja2.Environment(
         variable_start_string='{', variable_end_string='}',
         undefined=jinja2.StrictUndefined, autoescape=False
@@ -261,4 +265,4 @@ G1 X100 Y100
 """
     compiler = OrderedTemplateCompiler(jinja_env)
     runner = compiler.compile(legacy_script)
-    assert runner is None, "Legacy macro without controls must not opt into ordered runner"
+    assert runner is not None

@@ -11,7 +11,8 @@ Read CODEX_HANDOFF.md and docs/language-v0.2.md before changing code.
 3. Flat blocks only. No direct or macro-mediated nested spawning in v0.2.
 4. Names are optional, case-sensitive values. Bare waits and result collection are
    per caller; completion is retained, never consumed by the first waiter.
-5. Preserve legacy macro rendering unless literal controls opt that macro in.
+5. Preserve legacy macro rendering unless that macro explicitly declares
+   `render_mode: ordered`. Never infer the mode from control text or its caller.
    Preserve command buffering, modal state, existing motion planner and MCU firmware.
 6. `result`, `reply`, `waited` have the meanings in the behavioral spec. No console
    scraping, mutable shared result namespaces or implicit last-subcommand replies.

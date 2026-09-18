@@ -6,3 +6,10 @@ __pycache__/
 build/
 dist/
 vendor/
+.codex-work/
+outputs/
+# Original intake copies; canonical sources and provenance are tracked instead.
+/gco-routines-codex-work-complete.zip
+/gco-routines-CODEX-HANDOFF.md
+/gco-routines-CODEX-PROMPT.md
+/gco-routines-language-v0.2.md

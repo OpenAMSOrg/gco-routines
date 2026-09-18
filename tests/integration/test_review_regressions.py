@@ -27,8 +27,8 @@ def execute(env, source):
     return errors
 
 
-def macro(env, name, source):
-    obj = gcode_macro.GCodeMacro(MacroConfig(env.printer, name, source))
+def macro(env, name, source, render_mode=None):
+    obj = gcode_macro.GCodeMacro(MacroConfig(env.printer, name, source, render_mode))
     env.printer.add_object('gcode_macro ' + name, obj)
     return obj
 
@@ -41,7 +41,7 @@ def test_actual_macro_status_refreshes_after_command(klippy_env):
     seen = []
     env.gcode.register_command('SHOW', lambda g: seen.append(g.get_int('VALUE')))
     macro(env, 'LIVE', 'WAIT\nSHOW VALUE={printer.sensor.value}\nCHANGE\n'
-          'SHOW VALUE={printer.sensor.value}')
+          'SHOW VALUE={printer.sensor.value}', render_mode='ordered')
     assert not execute(env, 'LIVE')
     assert seen == [0, 1]
 
@@ -80,7 +80,7 @@ def test_cancelled_queued_template_never_calls_actions(klippy_env):
     env = klippy_env
     seen = []
     env.manager.macro_manager.env.globals['record'] = lambda: seen.append('unsafe') or ''
-    macro(env, 'QUEUED', 'START\n{record()}\nEND\nSTOPRUN')
+    macro(env, 'QUEUED', 'START\n{record()}\nEND\nSTOPRUN', render_mode='ordered')
     env.gcode.register_command('STOPRUN', lambda g: env.manager.cancel_active_runs('test cancel'))
     assert execute(env, 'QUEUED')
     assert seen == []
@@ -91,7 +91,7 @@ def test_paused_managed_macro_cannot_spawn(klippy_env):
     env.manager.set_paused(True)
     seen = []
     env.gcode.register_command('MOVE', lambda g: seen.append('unsafe'))
-    macro(env, 'PAUSED', 'START\nMOVE\nEND\nWAIT')
+    macro(env, 'PAUSED', 'START\nMOVE\nEND\nWAIT', render_mode='ordered')
     assert execute(env, 'PAUSED')
     assert seen == []
 
@@ -111,8 +111,9 @@ def test_macro_reply_is_not_last_nested_device_reply(klippy_env, prefix):
     seen = []
     env.gcode.register_command('DEVICE', lambda g: env.manager.driver_api.set_reply(g, {'value': 9}))
     env.gcode.register_command('SHOW', lambda g: seen.append(g.get_int('VALUE')))
-    macro(env, 'HELPER', prefix + 'DEVICE')
-    macro(env, 'CALLER', 'WAIT\nHELPER\nSHOW VALUE={reply.value|default(-1)}')
+    macro(env, 'HELPER', prefix + 'DEVICE', render_mode='ordered' if prefix else None)
+    macro(env, 'CALLER', 'WAIT\nHELPER\nSHOW VALUE={reply.value|default(-1)}',
+          render_mode='ordered')
     assert not execute(env, 'CALLER')
     assert seen == [-1]
 
