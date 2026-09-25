@@ -123,12 +123,24 @@ class RunAdmissionMutex:
     (for example a virtual-SD line finishes while a child's command is in
     flight), ownership passes to one of them.  The real mutex is released
     only when the last greenlet of the run leaves, so an unrelated request
-    never runs while a routine command is in flight.  ``test()`` still
-    reports the real mutex state.
+    never runs while a routine command is in flight.
+
+    ``test()`` answers the question Klipper's callers ask: is another request
+    pending that I must yield to?  Unrelated callers (idle_timeout timers,
+    webhooks, console) see the real mutex state.  A greenlet that would be
+    admitted to the owning run -- one bound to a running/waiting routine of
+    that run, or the virtual-SD worker feeding it (still unbound between
+    lines; ``affinity`` supplies that mapping) -- sees False while no
+    unrelated greenlet is queued on the real mutex, so the file's default
+    routine keeps going while a child command is in flight.  Once an outside
+    request is queued it sees True and yields, as stock Klipper intends.
     """
-    def __init__(self, original, runtime):
+    def __init__(self, original, runtime, affinity=None):
         self.original = original
         self.runtime = runtime
+        # Optional callable(greenlet) -> (run, routine) or None, for a
+        # greenlet that acts for a run without being bound to it yet.
+        self.affinity = affinity
         self.owner_greenlet = None
         self.owner_run = None
         self.owner_routine_id = None
@@ -138,7 +150,27 @@ class RunAdmissionMutex:
         self.unlock = self.__exit__
 
     def test(self):
-        return self.original.test()
+        if not self.original.test():
+            return False
+        if not self._inside or self._outsiders_waiting():
+            return True
+        return not self._member(greenlet.getcurrent())
+
+    def _outsiders_waiting(self):
+        # Klipper's ReactorMutex queues blocked greenlets in ``queue``; only
+        # greenlets that were not admitted ever queue.  Without that
+        # attribute, report the real state (stock behavior, no overlap).
+        queue = getattr(self.original, "queue", None)
+        return True if queue is None else bool(queue)
+
+    def _member(self, current):
+        """True if ``current`` would enter without queueing."""
+        if current in self._inside:
+            return True
+        run, routine = self._routine_for(current)
+        if routine is None and callable(self.affinity):
+            run, routine = self.affinity(current) or (None, None)
+        return self._admissible(run, routine)
 
     def holds(self, current=None):
         """True if ``current`` (default: this greenlet) is inside the mutex."""
@@ -157,13 +189,14 @@ class RunAdmissionMutex:
                 return run, routine
         return None, None
 
-    def _admitted(self, current):
-        if self.owner_greenlet is None or self.owner_run is None:
-            return False
-        run, routine = self._routine_for(current)
-        return (run is self.owner_run and routine is not None
+    def _admissible(self, run, routine):
+        return (self.owner_greenlet is not None and self.owner_run is not None
+                and run is self.owner_run and routine is not None
                 and routine.id != self.owner_routine_id
                 and routine.state in ("running", "waiting"))
+
+    def _admitted(self, current):
+        return self._admissible(*self._routine_for(current))
 
     def _set_owner(self, current):
         self.owner_greenlet = current
@@ -308,7 +341,8 @@ class IntegrationAdapter:
             self.gcode, strict=self.strict,
             virtual_sd=self.printer.lookup_object("virtual_sdcard", None))
         original_mutex = self.gcode.get_mutex()
-        owner_mutex = RunAdmissionMutex(original_mutex, self.runtime)
+        owner_mutex = RunAdmissionMutex(original_mutex, self.runtime,
+                                        affinity=self._sd_worker_affinity)
         self._owner_mutex = owner_mutex
         self.gcode.mutex = owner_mutex
         # GCodeIO caches this field in both pinned trees.
@@ -474,6 +508,24 @@ class IntegrationAdapter:
                          or greenlet.getcurrent() in self._sd_workers))
         except (AttributeError, TypeError):
             return False
+
+    def _sd_worker_affinity(self, current):
+        """(run, default routine) a virtual-SD worker greenlet feeds.
+
+        Between lines the worker is not bound to any routine, but its next
+        line will run in the default routine of its file's persistent run.
+        """
+        if current not in self._sd_workers:
+            return None
+        vsd = self.printer.lookup_object("virtual_sdcard", None)
+        current_file = getattr(vsd, "current_file", None)
+        state = self._sd_sources.get(
+            (id(vsd), id(current_file) if current_file is not None else None))
+        run = (self.runtime.runs.get(state.run_id)
+               if state is not None and state.run_id else None)
+        if run is None:
+            return None
+        return run, run.routines.get(run.default_id)
 
     def _source_state(self, persistent, source_name="sd"):
         if persistent:

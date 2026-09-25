@@ -248,10 +248,14 @@ fails there (except guards that pin unchanged behavior).
   Klipper completion barrier before `END` when physical completion is required.
 - Klipper's G-code mutex is released only when the last greenlet of the
   owning run leaves it, so unrelated requests never run while a routine
-  command is in flight. The virtual-SD worker's between-line `test()` check
-  therefore also waits for an in-flight child command: raw-file default lines
-  overlap a child command only when they were already executing when it began
-  (commands inside one ordered macro, such as the OAMS `_TX`, are unaffected).
+  command is in flight. The mutex's `test()` reports it free to a greenlet
+  that would be admitted to the owning run (including that file's virtual-SD
+  worker between lines) unless an unrelated greenlet is queued on Klipper's
+  mutex, so raw-file default lines continue while a child command runs and
+  still yield to pending outside requests. Other callers (idle_timeout,
+  webhooks, console) see the real state. This relies on `ReactorMutex.queue`
+  (identical in both pinned checkouts); without it `test()` falls back to the
+  real state, which is safe but stops that overlap.
 - Pause rejects new routines and suspends each admitted child at its next own
   command boundary until RESUME/CLEAR_PAUSE (cancel/reset/shutdown cancel it).
   Commands already executing complete. Children are not suspended while a

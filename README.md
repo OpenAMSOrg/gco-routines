@@ -192,11 +192,12 @@ Jinja `default` filter is used explicitly.
 - Unrelated external requests retain normal Klipper mutex serialization; only
   routines belonging to the lock owner's run receive cooperative admission.
   Klipper's G-code mutex stays held while any command of that run is in
-  flight, even after the request that acquired it has returned. On the
-  virtual-SD path the file worker therefore behaves as stock Klipper does for
-  any pending request: between lines it waits while a routine's command holds
-  the mutex. Default-routine lines already executing when a child command
-  starts overlap it; later file lines wait for that child command to return.
+  flight, even after the request that acquired it has returned, so an
+  unrelated request never interleaves with a routine command. The file's own
+  virtual-SD worker is not "another request": it keeps dispatching
+  default-routine lines after `END` while a child command is in flight, and
+  yields between lines only when an unrelated request is queued, as stock
+  Klipper does.
 - The `gco_routines` status object reports a virtual-SD/file print for as long
   as it runs, even when an API script or ordered macro starts its own
   transient run meanwhile; after the print ends it remains the reported run

@@ -100,3 +100,46 @@ def test_owner_unwinding_keeps_mutex_until_child_command_returns(klippy_env):
     assert log.index("background-end") < log.index("EXTERNAL")
     mutex = gcode.get_mutex()
     assert not mutex.test() and mutex.inside() == ()
+
+
+def test_sd_default_lines_overlap_child_command_without_outside_traffic(klippy_env,
+                                                                          tmp_path):
+    """The file's default routine continues after END while a child command
+    is in flight; an unrelated (idle_timeout-style) caller still sees the
+    G-code mutex as busy."""
+    env = klippy_env
+    reactor, gcode = env.reactor, env.gcode
+    log = []
+
+    def background(gcmd):
+        log.append("background-start")
+        reactor.pause(reactor.monotonic() + .060)
+        log.append("background-end")
+
+    def foreground(gcmd):
+        log.append("fg-start")
+        reactor.pause(reactor.monotonic() + .005)
+        log.append("fg-end")
+    gcode.register_command("BACKGROUND", background)
+    gcode.register_command("FG", foreground)
+    gcode.register_command("AFTER", lambda g: log.append("after"))
+    vsd, states = _sd_print(env, tmp_path, "START NAME=job\nBACKGROUND\nEND\n"
+                            "FG\nFG\nFG\nWAIT ON=job\nAFTER\n")
+    mutex = gcode.get_mutex()
+
+    def idle_timeout_style_check(eventtime):
+        # An unbound timer greenlet, like idle_timeout's "Printing" check.
+        log.append(("unbound test()", mutex.test(), mutex.original.test()))
+        return reactor.NEVER
+    reactor.register_timer(idle_timeout_style_check, reactor.monotonic() + .030)
+    _run_print(env, vsd)
+
+    assert log.count("fg-end") == 3
+    fg_ends = [i for i, item in enumerate(log) if item == "fg-end"]
+    assert log.index("background-start") < fg_ends[0]
+    assert fg_ends[-1] < log.index("background-end")
+    assert ("unbound test()", True, True) in log
+    assert log.index("background-start") < log.index(("unbound test()", True, True)) \
+        < log.index("background-end")
+    assert log[-1] == "after" and states == ["start", "complete"]
+    assert not mutex.test() and mutex.inside() == ()
