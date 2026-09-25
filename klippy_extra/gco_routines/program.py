@@ -205,14 +205,49 @@ def parse_program(source: str, source_id: str = "default") -> Program:
 parse_source = parse_program
 
 
-def preflight_file(filepath: str, max_bytes: int = 50_000_000) -> None:
-    """Validate a complete file before admission; never dispatch it."""
+# A physical line this long cannot be a G-code command (Klipper itself rejects
+# commands over 1 MiB).  The limit only bounds preflight memory when a file has
+# no newlines; it is not a whole-file size limit.
+MAX_PREFLIGHT_LINE_CHARS = 16 * 1024 * 1024
+_CONTROL_INITIALS = frozenset("SsEeWwNn")
+
+
+def _may_be_control(line: str) -> bool:
+    """Cheap necessary condition for ``_control`` to recognize a line.
+
+    START/END/WAIT (and transport-framed ``N<digits>`` controls) begin with one
+    of these letters after spaces/tabs; any other line is ordinary G-code.
+    """
+    stripped = line.lstrip(" \t")
+    return bool(stripped) and stripped[0] in _CONTROL_INITIALS
+
+
+def preflight_file(filepath: str,
+                   max_line_chars: int = MAX_PREFLIGHT_LINE_CHARS) -> None:
+    """Validate a complete file's control structure before admission.
+
+    The file is streamed line by line through a :class:`BlockCollector`.
+    Ordinary lines outside a block are neither retained nor fully parsed, so
+    memory is bounded by the collector's per-block limits and one line,
+    whatever the file size.  Line splitting matches :func:`parse_program`
+    (universal newlines).  Nothing is rendered or dispatched.
+    """
     if not os.path.exists(filepath):
         raise ProgramError("Source file does not exist: %s" % filepath)
-    if os.path.getsize(filepath) > max_bytes:
-        raise ProgramError("E_SOURCE_LIMIT: source file exceeds byte limit")
+    collector = BlockCollector(source_id=filepath)
     with open(filepath, "r", encoding="utf-8", errors="replace") as source_file:
-        source = source_file.read(max_bytes + 1)
-    if len(source.encode("utf-8")) > max_bytes:
-        raise ProgramError("E_SOURCE_LIMIT: source file exceeds byte limit")
-    parse_program(source, source_id=filepath)
+        line_num = 0
+        while True:
+            line = source_file.readline(max_line_chars + 1)
+            if not line:
+                break
+            line_num += 1
+            if line.endswith("\n"):
+                line = line[:-1]
+            elif len(line) > max_line_chars:
+                raise ProgramError(
+                    "E_SOURCE_LIMIT: line %d exceeds %d characters"
+                    % (line_num, max_line_chars))
+            if collector.collecting or _may_be_control(line):
+                collector.feed_line(line, line_num)
+    collector.assert_closed()

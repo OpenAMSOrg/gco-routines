@@ -13,74 +13,9 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import greenlet
 import jinja2
-from .program import ProgramError, parse_program
+from .program import BlockCollector, ProgramError, parse_program, preflight_file
 from .runtime import ContractError
 from .templates import LiveGetStatusWrapper, OrderedTemplateError
-
-try:
-    from .program import BlockCollector, preflight_file
-except ImportError:  # standalone copied extra: no reference frontend required
-    _IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
-    _START = re.compile(r"^START(?:\s+NAME=([A-Za-z_][A-Za-z0-9_]*))?\s*(?:;.*)?$",
-                        re.IGNORECASE)
-    _WAIT = re.compile(r"^WAIT(?:\s+ON=([A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*))?\s*(?:;.*)?$",
-                       re.IGNORECASE)
-
-    class BlockCollector:
-        def __init__(self):
-            self.collecting = False
-            self.start_line = 0
-            self.routine_name = None
-            self.buffer = []
-
-        def feed_line(self, line, line_num=1):
-            raw = str(line).strip()
-            clean = raw.split(";", 1)[0].strip()
-            start = _START.fullmatch(clean)
-            wait = _WAIT.fullmatch(clean)
-            upper = clean.upper()
-            if not self.collecting:
-                if start:
-                    name = start.group(1)
-                    if name == "default":
-                        raise ValueError("E_RESERVED_NAME: default is reserved")
-                    self.collecting = True
-                    self.start_line = line_num
-                    self.routine_name = name
-                    self.buffer = []
-                    return "COLLECTING", None
-                if upper == "END":
-                    raise ValueError("E_UNMATCHED_END: END has no matching START")
-                if wait:
-                    targets = wait.group(1)
-                    return "WAIT", (targets.split(",") if targets else None)
-                if upper.startswith(("START", "WAIT", "END")):
-                    raise ValueError("E_CONTROL_SYNTAX: malformed control line")
-                return "PASSTHROUGH", line
-            if start:
-                raise ValueError("E_NESTED_START: nested START is unsupported")
-            if upper == "END":
-                body, name = self.buffer, self.routine_name
-                self.collecting = False
-                self.routine_name = None
-                self.buffer = []
-                return "SPAWN", (name, body)
-            self.buffer.append(line)
-            return "COLLECTING", None
-
-        def assert_closed(self):
-            if self.collecting:
-                raise ValueError("E_UNCLOSED_START: START reaches end of source")
-
-    def preflight_file(filepath, max_bytes=50_000_000):
-        if not os.path.exists(filepath):
-            return
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read(max_bytes)
-        collector = BlockCollector()
-        for number, line in enumerate(content.splitlines(), 1):
-            collector.feed_line(line, number)
-        collector.assert_closed()
 
 
 class CompatibilityError(RuntimeError):

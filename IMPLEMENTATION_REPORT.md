@@ -241,6 +241,13 @@ Hashes, checks and rollback are recorded in
 - `get_status()` reports a running virtual-SD/file print even while a
   transient API-script or ordered-macro run executes; after the print ends it
   stays the reported run until the next run starts.
+- Virtual-SD preflight streams the file line by line without retaining
+  ordinary lines, so there is no whole-file size limit. Each `START` block is
+  limited to 100,000 lines / 2 MB and a physical line to 16 Mi characters.
+  Preflight still runs synchronously in the `M23`/`SDCARD_PRINT_FILE` handler:
+  a 45 MB control-free file took 0.36 s with 24 MB peak RSS on the development
+  machine (previously 0.99 s / 185 MB, and files over 50 MB were rejected);
+  expect it to take several times longer on a Raspberry Pi.
 - Managed macro sections must load after `[gco_routines]`; the plugin fails
   closed when it cannot retain their original source.
 - Managed Jinja statements must be on separate physical lines from output;

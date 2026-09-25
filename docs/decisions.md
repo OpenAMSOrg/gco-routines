@@ -47,3 +47,9 @@ G-code syntax and do not make the slicer evaluate printer state to validate a bl
   (RESUME cannot be accepted until that wait ends). Status keeps the schema:
   a suspended child is `waiting` with empty `waiting_on` and detail
   `{"suspended": "paused"}`.
+- Virtual-SD preflight has no whole-file size limit. It previously rejected any
+  file over 50 MB with `E_SOURCE_LIMIT`, even without controls, and built a
+  whole-file `Program` in memory. It now streams the file through the
+  `BlockCollector` without retaining ordinary lines; per-block limits and all
+  structural errors are unchanged, plus a 16 Mi-character physical-line sanity
+  bound. `parse_program` remains the parser for (small) complete API scripts.

@@ -171,7 +171,9 @@ Jinja `default` filter is used explicitly.
 - Complete API scripts and virtual-SD files may contain raw control blocks.
 - Virtual SD preflights the complete file through `_load_file`, covering both
   `M23`/`M24` and `SDCARD_PRINT_FILE`, and performs an implicit join before EOF
-  can be reported as successful.
+  can be reported as successful. Preflight streams the file with bounded
+  memory; there is no file-size limit (each `START` block is limited to
+  100,000 lines / 2 MB).
 - Generated controls from legacy macros or rendered expressions are rejected.
 - Interactive pseudo-TTY control blocks and line-number-framed controls are
   rejected because their complete source boundary is unavailable.
