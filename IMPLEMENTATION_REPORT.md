@@ -197,6 +197,32 @@ No tracked Klipper files changed. The pre-existing RFID-B reset warning remains.
 Hashes, checks and rollback are recorded in
 [deployment evidence](evidence/render-mode-deployment-2026-09-18.md).
 
+### Review corrections (2026-09-25, local only)
+
+Branch `fix/review-2026-09-25` fixes seven confirmed review findings, one
+commit each: contract errors reaching Klipper's dispatcher/webhooks are
+command errors instead of shutdowns; managed recursion is a command error;
+the G-code mutex is held until a run's last in-flight command returns;
+PAUSE suspends admitted children instead of faulting the run; a transient
+run no longer displaces a running file print in status; virtual-SD
+preflight streams files with no size limit; and compatibility errors are
+configuration errors (plus small cleanups). Design corrections are recorded
+in `docs/decisions.md`. These changes were **not** deployed, installed, or
+run on the printer or the Pi; they were not executed on Python 3.9 (grammar
+check only).
+
+```bash
+.venv/bin/python -m pytest -q                              # 390 passed in 37.08s
+.venv/bin/python -m pytest -q tests --ignore=tests/integration   # 227 passed in 1.05s
+.venv/bin/python -c "import ast,glob; [ast.parse(open(f).read(), f, feature_version=(3,9)) for f in glob.glob('klippy_extra/gco_routines/*.py')]"
+.venv/bin/python tools/smoke_klipper.py --klipper vendor/klipper --extra-parent klippy_extra --macros config/oams_macros.cfg           # PASS
+.venv/bin/python tools/smoke_klipper.py --klipper vendor/klipper-upstream --extra-parent klippy_extra --macros config/oams_macros.cfg  # PASS
+git -C vendor/klipper diff --exit-code; git -C vendor/klipper-upstream diff --exit-code   # clean
+```
+
+Each new regression test was also run against the previous revision and
+fails there (except guards that pin unchanged behavior).
+
 ## Operational limits
 
 - After the FPS hardware fix, the initial T2 load, T2-to-T3 and T3-to-T2
