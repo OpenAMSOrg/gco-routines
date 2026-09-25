@@ -20,3 +20,16 @@ New clarification: static grammar is necessary but not sufficient. Structure mus
 be literal to be validated before rendering. Name resolution, scope-dependent
 availability, command replies and safety require later checks. Preserve ordinary
 G-code syntax and do not make the slicer evaluate printer state to validate a block.
+
+## Design corrections (review 2026-09-25)
+
+- Contract errors are command errors. Klipper's dispatcher and webhooks shut the
+  printer down on any exception other than `gcode.error`. Source, run/routine,
+  dependency, result and managed-template errors (`ContractError`,
+  `ProgramError`, `OrderedTemplateError`, Jinja `TemplateError`) are converted
+  to `gcode.error` at every dispatcher seam; genuine internal errors are no
+  longer masked as command errors. Consequently `M23`/`SDCARD_PRINT_FILE` of a
+  rejected file now raises `gcode.error` instead of a bare `ValueError` (which
+  shut Klipper down); the two tests asserting `ValueError` were corrected.
+  Ordered-macro Jinja evaluation errors remain command errors, as stock Klipper
+  reports legacy render errors.

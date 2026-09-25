@@ -202,6 +202,6 @@ def test_shipped_bad_file_is_rejected_before_prefix(diagnostic):
     from test_virtual_sd_lifecycle import _virtual_sd, _LoadCommand
     env, diagnostic = diagnostic
     vsd = _virtual_sd(env, ROOT / "printer_tests/files")
-    with pytest.raises(ValueError, match="E_UNCLOSED_START"):
+    with pytest.raises(env.gcode.error, match="E_UNCLOSED_START"):
         vsd.cmd_M23(_LoadCommand("rejected_unclosed.gcode"))
     assert not diagnostic.events and vsd.current_file is None

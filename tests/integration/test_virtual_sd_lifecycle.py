@@ -89,7 +89,9 @@ def test_virtual_sd_preflight_rejects_unclosed_block_before_open(klippy_env, tmp
     bad = tmp_path / "bad.gcode"
     bad.write_text("START NAME=oops\nG1 X1\n")
     vsd = _virtual_sd(klippy_env, tmp_path)
-    with pytest.raises(ValueError, match="E_UNCLOSED_START"):
+    # A command error, not a bare ValueError: M23 runs inside Klipper's
+    # dispatcher, which shuts the printer down on any other exception.
+    with pytest.raises(klippy_env.gcode.error, match="E_UNCLOSED_START"):
         vsd.cmd_M23(_LoadCommand("bad.gcode"))
     assert vsd.current_file is None
 

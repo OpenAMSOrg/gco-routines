@@ -595,21 +595,34 @@ class OrderedTemplate:
             boundary_clear()
             return ""
 
+        # Exceptions raised by the runtime effects below keep their identity
+        # (command errors, contract errors, or genuine internal errors).
+        # Anything else escaping the generator came from evaluating Jinja
+        # itself, which stock Klipper reports as a command error.
+        effect_errors = []
+
+        def effect(func, *args):
+            try:
+                return func(*args)
+            except Exception as exc:
+                effect_errors[:] = [exc]
+                raise
+
         @_pass_context
         def gco_spawn(jinja_context, name, child_index, local_values):
             # pass_context is used for compatibility with Jinja helpers, but
             # local_values is intentionally explicit: loop variables and local
             # assignment slots are Python locals in generated Jinja code and
             # cannot be recovered reliably from Context.vars after a yield.
-            return start_child(name, child_index, local_values)
+            return effect(start_child, name, child_index, local_values)
 
         @_pass_context
         def gco_dispatch(jinja_context, text):
-            return dispatch(text)
+            return effect(dispatch, text)
 
         @_pass_context
         def gco_wait(jinja_context, targets):
-            return wait(targets)
+            return effect(wait, targets)
 
         execution = dict(context_vars)
         execution.update(
@@ -625,7 +638,16 @@ class OrderedTemplate:
         )
         # Iterating the generator is the key distinction from stock render():
         # each transformed Output node is consumed only after prior effects.
-        for _ in self.template.generate(execution):
+        generator = self.template.generate(execution)
+        while True:
+            try:
+                next(generator)
+            except StopIteration:
+                break
+            except Exception as exc:
+                if effect_errors and exc is effect_errors[0]:
+                    raise
+                raise OrderedTemplateError(str(exc)) from exc
             check = getattr(runtime, "check_execution", None)
             if check is not None:
                 check(run, caller_routine)

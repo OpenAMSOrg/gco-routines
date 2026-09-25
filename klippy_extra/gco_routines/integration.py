@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import greenlet
-from .program import parse_program
+import jinja2
+from .program import ProgramError, parse_program
+from .runtime import ContractError
 from .templates import LiveGetStatusWrapper, OrderedTemplateError
 
 try:
@@ -83,6 +85,28 @@ except ImportError:  # standalone copied extra: no reference frontend required
 
 class CompatibilityError(RuntimeError):
     pass
+
+
+# Extension contract violations (source structure, run/routine lifecycle,
+# dependencies, results and managed template evaluation) are user-facing
+# G-code errors.  Klipper's dispatcher and webhooks treat any other exception
+# as an internal error and invoke a printer shutdown, so these must be
+# converted before they reach either.  Genuine internal errors are *not*
+# converted: they propagate so Klipper logs a traceback as for any extra bug.
+CONTRACT_ERRORS = (ContractError, ProgramError, OrderedTemplateError,
+                   jinja2.TemplateError)
+
+
+@contextmanager
+def command_errors(gcode):
+    """Report extension contract errors through Klipper's command-error path."""
+    error = gcode.error
+    try:
+        yield
+    except CONTRACT_ERRORS as exc:
+        if isinstance(exc, error):
+            raise
+        raise error(str(exc)) from exc
 
 
 class _RecoveryScript(str):
@@ -386,10 +410,13 @@ class IntegrationAdapter:
             end = getattr(self.runtime, "end_command_frame", None)
             frame = begin(gcmd) if callable(begin) else None
             try:
-                if gcmd.get_command() in ("PAUSE", "RESUME", "CLEAR_PAUSE", "CANCEL_PRINT", "M112"):
-                    with self._recovery_context():
-                        return handler(gcmd, *args, **kwargs)
-                return handler(gcmd, *args, **kwargs)
+                # A device handler may violate a result contract through the
+                # driver API; report that as a command error, not a shutdown.
+                with command_errors(self.gcode):
+                    if gcmd.get_command() in ("PAUSE", "RESUME", "CLEAR_PAUSE", "CANCEL_PRINT", "M112"):
+                        with self._recovery_context():
+                            return handler(gcmd, *args, **kwargs)
+                    return handler(gcmd, *args, **kwargs)
             finally:
                 if callable(end):
                     end(frame)
@@ -482,6 +509,12 @@ class IntegrationAdapter:
         if isinstance(script, _RecoveryScript):
             with self._recovery_context():
                 return self._orig_run_script(script)
+        # Webhooks and the virtual-SD worker call run_script() directly, so this
+        # is a dispatcher seam: contract errors must become command errors.
+        with command_errors(self.gcode):
+            return self._run_managed_script(script)
+
+    def _run_managed_script(self, script):
         # VirtualSD calls run_script() once per physical source line. A public
         # API call supplies a complete source in one call. Calls made by a
         # command handler are internal and may not manufacture control lines.
@@ -501,10 +534,7 @@ class IntegrationAdapter:
         elif has_controls:
             # Validate a complete submission before admitting its first effect.
             # Wait for unrelated requests before creating/replacing a run.
-            try:
-                parse_program(script, source_id="api")
-            except ValueError as exc:
-                raise self.gcode.error(str(exc))
+            parse_program(script, source_id="api")
             with self.gcode.get_mutex():
                 run = self.runtime.start_run("api_run")
                 with self.runtime.default_context(run) as routine:
@@ -568,6 +598,12 @@ class IntegrationAdapter:
         return payload
 
     def _wrapped_process_commands(self, commands: Iterable[str], need_ack=True):
+        # Klipper's GCodeIO and run_script() call this directly; contract
+        # errors raised while admitting a source must become command errors.
+        with command_errors(self.gcode):
+            return self._process_managed_commands(commands, need_ack)
+
+    def _process_managed_commands(self, commands: Iterable[str], need_ack=True):
         commands = list(commands)
         is_sd = self._is_sd_source()
         gcode_io = self.printer.lookup_object("gcode_io", None)
@@ -646,8 +682,11 @@ class IntegrationAdapter:
                 self._adopt_mutex_owner(run, routine)
                 return process_in_order()
         except Exception as exc:
-            run.fail_routine((routine.id if routine else run.default_id), str(exc))
-            raise self.gcode.error(str(exc))
+            # Fail the run for every error type; only contract errors are
+            # converted (by command_errors), internal errors keep their type.
+            run.fail_routine((routine.id if routine else run.default_id),
+                             str(exc) or type(exc).__name__)
+            raise
 
     def _hook_virtual_sdcard(self, vsd):
         if vsd is None or id(vsd) in self._hooked_vsd:
@@ -676,6 +715,12 @@ class IntegrationAdapter:
 
         @functools.wraps(original)
         def load_file(gcmd, filename, check_subdirs=False):
+            # Reached from M23/SDCARD_PRINT_FILE handlers: a rejected source or
+            # run must be a command error, never an internal-error shutdown.
+            with command_errors(self.gcode):
+                return load_managed_file(gcmd, filename, check_subdirs)
+
+        def load_managed_file(gcmd, filename, check_subdirs):
             resolve_preflight(filename, check_subdirs)
             result = original(gcmd, filename, check_subdirs=check_subdirs)
             run = self.runtime.start_run("sd_print")
@@ -866,7 +911,12 @@ class IntegrationAdapter:
             if manager is None or (runner is None and
                                    manager.get_bound_context()[1] is None):
                 return original_cmd(obj, gcmd)
+            # Macro handlers run inside Klipper's dispatcher: report contract
+            # errors (including starting a run) as command errors only.
+            with command_errors(manager.gcode):
+                return managed_macro_cmd(manager, runner, obj, gcmd)
 
+        def managed_macro_cmd(manager, runner, obj, gcmd):
             run, routine = manager.get_bound_context()
             owns_run = False
             if routine is None:
@@ -900,9 +950,12 @@ class IntegrationAdapter:
                     manager.finish_active_run()
                 return result
             except Exception as exc:
+                # Cancel an owned run for every error type.  Only contract
+                # errors become command errors (see command_errors); genuine
+                # internal errors propagate for Klipper to log and handle.
                 if owns_run:
-                    run.cancel_run(str(exc))
-                raise manager.gcode.error(str(exc))
+                    run.cancel_run(str(exc) or type(exc).__name__)
+                raise
             finally:
                 manager.recursion_tracker.exit(routine.id, obj.alias)
                 if context is not None:
