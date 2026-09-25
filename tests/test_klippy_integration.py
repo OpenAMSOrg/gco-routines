@@ -59,3 +59,14 @@ def test_lifecycle_event_cancels_runs():
     IntegrationAdapter(printer, runtime).install()
     printer.send_event("klippy:shutdown")
     assert runtime.cancelled
+
+
+def test_manager_reports_unsupported_dispatcher_as_config_error():
+    printer = FakePrinter()
+    printer.lookup_object("gcode").gco_routines_compatibility = False
+
+    class ConfigError(Exception):
+        pass
+    with pytest.raises(ConfigError, match="Unsupported Klipper GCodeDispatch baseline"):
+        GcoRoutinesManager(SimpleNamespace(get_printer=lambda: printer,
+                                           error=ConfigError))

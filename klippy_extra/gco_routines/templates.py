@@ -554,8 +554,6 @@ class OrderedTemplate:
                 diag = diagnostics[0]
                 raise OrderedTemplateError("%s: %s" % (diag.code, diag.message))
             boundary_clear()
-            if hasattr(caller_routine, "command"):
-                caller_routine.command = raw
             value = runtime.dispatch_command_for_routine(caller_routine, raw)
             if isinstance(value, Mapping) and hasattr(caller_routine, "reply"):
                 caller_routine.reply = dict(value)
@@ -707,7 +705,12 @@ class OrderedTemplateCompiler:
             if in_statement:
                 statement_lines.update(range(lineno, lineno + value.count('\n') + 1))
             elif kind == "data":
-                output_lines.update(lineno + offset for offset, text in enumerate(value.split('\n')) if text.strip())
+                # A trailing G-code ';' comment is not output: it is dropped
+                # before dispatch, so "{% set x = 1 %} ; note" is not mixed.
+                output_lines.update(
+                    lineno + offset
+                    for offset, text in enumerate(value.split('\n'))
+                    if text.split(';', 1)[0].strip())
             elif kind == "variable_begin":
                 output_lines.add(lineno)
             if kind == "block_end":

@@ -5,8 +5,12 @@ every exception other than ``gcode.error`` as an internal error and call
 ``invoke_shutdown``.  These tests drive the real reactor, dispatcher and
 virtual-SD worker from the pinned checkout.
 """
+from types import SimpleNamespace
+
 import pytest
 
+import gco_routines
+from gco_routines.integration import CompatibilityError
 from test_review_regressions import execute, macro
 from test_virtual_sd_lifecycle import _LoadCommand, _virtual_sd
 
@@ -158,3 +162,25 @@ def test_non_recursive_helper_still_runs_after_recursion_error(klippy_env):
     assert not execute(env, "TWICE")
     assert seen == ["helper", "helper"]
     assert not env.printer.is_shutdown()
+
+
+def test_incompatible_setup_is_a_config_error(stock_klippy_env):
+    """CompatibilityError from the manager constructor or the connect-time
+    hooks is reported as a configuration error, not an internal error."""
+    env = stock_klippy_env
+    # A macro section loaded before [gco_routines] cannot be validated.
+    macro(env, "EARLY", "M117 early")
+
+    class ConfigError(Exception):
+        pass
+    cfg = SimpleNamespace(get_printer=lambda: env.printer, error=ConfigError)
+    with pytest.raises(ConfigError, match=r"must be loaded before \[gcode_macro EARLY\]"):
+        gco_routines.load_config(cfg)
+
+
+def test_connect_time_incompatibility_is_a_config_error(klippy_env):
+    env = klippy_env
+    env.printer.add_object("virtual_sdcard", SimpleNamespace())
+    with pytest.raises(env.printer.config_error, match="lacks _load_file") as exc:
+        env.manager.adapter._handle_connect()
+    assert not isinstance(exc.value, CompatibilityError)

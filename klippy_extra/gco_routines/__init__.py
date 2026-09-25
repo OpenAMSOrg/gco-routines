@@ -39,23 +39,26 @@ class GcoRoutinesManager:
             self.macro_manager = load_object(config, "gcode_macro")
         if self.macro_manager is None and hasattr(self.printer, "lookup_object"):
             self.macro_manager = self.printer.lookup_object("gcode_macro", None)
-        self.ordered_macro_compiler = (
-            OrderedTemplateCompiler(self.macro_manager.env)
-            if self.macro_manager is not None and hasattr(self.macro_manager, "env")
-            else None
-        )
+        # An unsupported Klipper baseline or configuration order is a
+        # configuration error, not an internal error during connect.
+        try:
+            self.ordered_macro_compiler = (
+                OrderedTemplateCompiler(self.macro_manager.env)
+                if self.macro_manager is not None
+                and hasattr(self.macro_manager, "env")
+                else None
+            )
 
-        # 1. Preflight command collision check
-        self._check_command_collisions()
+            # 1. Preflight collisions, then register gcode commands
+            self._register_reserved_commands()
 
-        # 2. Register gcode commands
-        self._register_reserved_commands()
+            # 2. Install live method wrappers
+            self.adapter = IntegrationAdapter(self.printer, self)
+            self.adapter.install()
+        except CompatibilityError as exc:
+            raise config.error(str(exc)) from exc
 
-        # 3. Install live method wrappers
-        self.adapter = IntegrationAdapter(self.printer, self)
-        self.adapter.install()
-
-        # 4. Register printer object for status observability
+        # 3. Register printer object for status observability
         self.printer.add_object('gco_routines', self)
 
         # Initialize default run
@@ -69,8 +72,9 @@ class GcoRoutinesManager:
         conflicts = [cmd for cmd in RESERVED_COMMANDS
                      if cmd in handlers or cmd in base or cmd in mux]
         if conflicts:
-            raise self.config.error(
-                "Reserved gco-routine command collision: " + ", ".join(conflicts))
+            raise self.config.error("; ".join(
+                "Reserved gco-routine command '%s' collides with an existing "
+                "registration" % cmd for cmd in conflicts))
         specs = [
             ("START", self.cmd_START, "Start background gco-routine"),
             ("END", self.cmd_END, "End background gco-routine block"),
@@ -93,11 +97,7 @@ class GcoRoutinesManager:
 
     def begin_command_frame(self, gcmd):
         """Create a per-dispatch result frame, isolated across nested calls."""
-        try:
-            import greenlet as _greenlet
-            key = _greenlet.getcurrent()
-        except ImportError:  # pragma: no cover
-            key = id(self)
+        key = greenlet.getcurrent()
         stack = self._command_frames.setdefault(key, [])
         frame = {"gcmd": gcmd, "reply": {}}
         stack.append(frame)
@@ -126,11 +126,7 @@ class GcoRoutinesManager:
             routine.reply = dict(frame["reply"])
 
     def _current_frame(self, gcmd=None):
-        try:
-            import greenlet as _greenlet
-            key = _greenlet.getcurrent()
-        except ImportError:  # pragma: no cover
-            key = id(self)
+        key = greenlet.getcurrent()
         stack = self._command_frames.get(key, [])
         if not stack:
             return None
@@ -138,15 +134,6 @@ class GcoRoutinesManager:
         if gcmd is not None and frame.get("gcmd") is not gcmd:
             return None
         return frame
-
-    def _check_command_collisions(self):
-        mux = getattr(self.gcode, "mux_commands", {})
-        for cmd in RESERVED_COMMANDS:
-            if (cmd in self.gcode.ready_gcode_handlers
-                    or cmd in self.gcode.base_gcode_handlers or cmd in mux):
-                raise self.config.error(
-                    f"Reserved gco-routine command '{cmd}' collides with an existing registration"
-                )
 
     @staticmethod
     def _is_live_persistent(run: Optional[Run]) -> bool:
@@ -223,15 +210,6 @@ class GcoRoutinesManager:
         run = run or self.get_current_run()
         with run.routine_context(run.get_routine(run.default_id)) as routine:
             yield routine
-
-    def is_child_of_lock_owner(self, curr_g: greenlet.greenlet, owner_g: greenlet.greenlet) -> bool:
-        """HRAL check: determines if curr_g is an admitted descendant routine of owner_g."""
-        for run in self.runs.values():
-            owner_r = run.get_routine_by_greenlet(owner_g)
-            curr_r = run.get_routine_by_greenlet(curr_g)
-            if owner_r and curr_r and curr_r.id != owner_r.id:
-                return True
-        return False
 
     def set_command_reply(self, gcmd, mapping: dict = None):
         if mapping is None:

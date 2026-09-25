@@ -249,3 +249,16 @@ def test_standalone_ordered_compiler_needs_no_controls(monkeypatch):
     assert runtime.events == [('run:0', 'T1'), ('run:0', 'M117 1')]
     with pytest.raises(OrderedTemplateError, match='E_TEMPLATE_COMPOSITION'):
         run('{% include "external.jinja" %}')
+
+
+def test_statement_with_trailing_gcode_comment_is_accepted():
+    # The trailing ';' comment is dropped before dispatch: not mixed output.
+    runtime, _ = run('{% set x = 7 %} ; remember x\nM117 {x}')
+    assert runtime.events == [('run:0', 'M117 7')]
+
+
+def test_inline_statement_inside_a_command_is_still_rejected():
+    with pytest.raises(OrderedTemplateError, match='separate command lines'):
+        run('G1 X{% if true %}10{% endif %}')
+    with pytest.raises(OrderedTemplateError, match='separate command lines'):
+        run('M117 a ; b {% set x = 1 %}{x}')

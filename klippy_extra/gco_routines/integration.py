@@ -345,7 +345,15 @@ class IntegrationAdapter:
         self._hook_gcode_macro(self.printer.lookup_object("gcode_macro", None))
 
     def _handle_connect(self, *args):
-        self._install_existing_objects()
+        # Objects loaded after [gco_routines] are hooked at connect; an
+        # unsupported one is a configuration error, not an internal error.
+        try:
+            self._install_existing_objects()
+        except CompatibilityError as exc:
+            config_error = getattr(self.printer, "config_error", None)
+            if config_error is None:
+                raise
+            raise config_error(str(exc)) from exc
 
     def _handle_shutdown(self, *args):
         self.runtime.cancel_active_runs("Klipper shutdown/disconnect")
