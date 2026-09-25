@@ -719,7 +719,8 @@ class IntegrationAdapter:
             if state.run_id and state.run_id in getattr(self.runtime, "runs", {}):
                 run = self.runtime.runs[state.run_id]
             else:
-                run = self.runtime.start_run(source_name if persistent else "api_run")
+                run = self.runtime.start_run(
+                    source_name if persistent else "api_run", persistent=persistent)
                 state.run_id = run.run_id
 
         def process_in_order():
@@ -787,7 +788,7 @@ class IntegrationAdapter:
         def load_managed_file(gcmd, filename, check_subdirs):
             resolve_preflight(filename, check_subdirs)
             result = original(gcmd, filename, check_subdirs=check_subdirs)
-            run = self.runtime.start_run("sd_print")
+            run = self.runtime.start_run("sd_print", persistent=True)
             self._sd_sources.clear()
             current = getattr(vsd, "current_file", None)
             if current is not None:

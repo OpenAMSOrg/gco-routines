@@ -238,6 +238,9 @@ Hashes, checks and rollback are recorded in
   for the child. The API `pause_resume/cancel` endpoint, shutdown or `M112`
   recover; console `CANCEL_PRINT` cannot enter. End files with an explicit
   `WAIT` to avoid it until the join is made a mutex-holding SD command.
+- `get_status()` reports a running virtual-SD/file print even while a
+  transient API-script or ordered-macro run executes; after the print ends it
+  stays the reported run until the next run starts.
 - Managed macro sections must load after `[gco_routines]`; the plugin fails
   closed when it cannot retain their original source.
 - Managed Jinja statements must be on separate physical lines from output;

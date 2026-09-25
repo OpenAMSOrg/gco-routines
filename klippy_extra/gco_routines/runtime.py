@@ -139,6 +139,9 @@ class Run:
         self.fault: Optional[str] = None
         self.is_cancelled = False
         self.generation = 0
+        # A persistent run spans source submissions (a virtual-SD print or
+        # file input); transient runs are one API script or macro invocation.
+        self.persistent = False
         self._new_routine("default", None)
 
     def _new_completion(self) -> Any:

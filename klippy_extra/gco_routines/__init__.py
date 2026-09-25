@@ -148,7 +148,12 @@ class GcoRoutinesManager:
                     f"Reserved gco-routine command '{cmd}' collides with an existing registration"
                 )
 
-    def start_run(self, run_id: str) -> Run:
+    @staticmethod
+    def _is_live_persistent(run: Optional[Run]) -> bool:
+        return (run is not None and run.persistent
+                and run.routines[run.default_id].state in ("running", "waiting"))
+
+    def start_run(self, run_id: str, persistent: bool = False) -> Run:
         active = self.runs.get(self.active_run_id)
         if active is not None and any(
                 routine.id != active.default_id
@@ -171,8 +176,14 @@ class GcoRoutinesManager:
         if run_id in self.runs:
             run_id = "%s_%d" % (run_id, self._run_sequence)
         run = Run(run_id, self.reactor)
+        run.persistent = bool(persistent)
         self.runs[run_id] = run
-        self.active_run_id = run_id
+        # The active run is what get_status() and unbound callers observe.
+        # A transient API/macro run never displaces a persistent file run
+        # that is still running; it executes through its own bound context.
+        # Once the file run has ended it stays reported until the next run.
+        if persistent or not self._is_live_persistent(active):
+            self.active_run_id = run_id
         return run
 
     def get_current_run(self) -> Run:

@@ -194,6 +194,10 @@ Jinja `default` filter is used explicitly.
   any pending request: between lines it waits while a routine's command holds
   the mutex. Default-routine lines already executing when a child command
   starts overlap it; later file lines wait for that child command to return.
+- The `gco_routines` status object reports a virtual-SD/file print for as long
+  as it runs, even when an API script or ordered macro starts its own
+  transient run meanwhile; after the print ends it remains the reported run
+  until the next run starts.
 - Failed/cancelled runs cannot issue subsequent ordinary commands, including
   commands in legacy helpers. Known pause/cancel/emergency handlers and configured
   virtual-SD error cleanup retain a scoped recovery path (no routine controls).
