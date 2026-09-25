@@ -179,6 +179,12 @@ Jinja `default` filter is used explicitly.
   invalidate active runs and wake suspended waits.
 - Unrelated external requests retain normal Klipper mutex serialization; only
   routines belonging to the lock owner's run receive cooperative admission.
+  Klipper's G-code mutex stays held while any command of that run is in
+  flight, even after the request that acquired it has returned. On the
+  virtual-SD path the file worker therefore behaves as stock Klipper does for
+  any pending request: between lines it waits while a routine's command holds
+  the mutex. Default-routine lines already executing when a child command
+  starts overlap it; later file lines wait for that child command to return.
 - Failed/cancelled runs cannot issue subsequent ordinary commands, including
   commands in legacy helpers. Known pause/cancel/emergency handlers and configured
   virtual-SD error cleanup retain a scoped recovery path (no routine controls).

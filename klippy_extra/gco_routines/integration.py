@@ -174,19 +174,46 @@ def validate_compatibility(gcode, *, strict=True, virtual_sd=None):
 
 
 class RunAdmissionMutex:
-    """Keep Klipper serialization, admitting only a child of the owner run."""
+    """Keep Klipper's G-code serialization while a managed run executes.
+
+    Klipper's real mutex is held for as long as *any* greenlet of the owning
+    run is inside.  The admission rule is:
+
+    - a greenlet already inside may re-enter (depth counted);
+    - any other routine of the owner's run (not only a child of the owner)
+      that is still running or waiting is admitted without queueing;
+    - every unrelated greenlet queues on Klipper's real mutex.
+
+    When the owner leaves while other greenlets of its run are still inside
+    (for example a virtual-SD line finishes while a child's command is in
+    flight), ownership passes to one of them.  The real mutex is released
+    only when the last greenlet of the run leaves, so an unrelated request
+    never runs while a routine command is in flight.  ``test()`` still
+    reports the real mutex state.
+    """
     def __init__(self, original, runtime):
         self.original = original
         self.runtime = runtime
         self.owner_greenlet = None
         self.owner_run = None
         self.owner_routine_id = None
-        self._bypassed = {}
+        # Every greenlet currently inside (owner included) -> nesting depth.
+        self._inside = {}
         self.lock = self.__enter__
         self.unlock = self.__exit__
 
     def test(self):
         return self.original.test()
+
+    def holds(self, current=None):
+        """True if ``current`` (default: this greenlet) is inside the mutex."""
+        if current is None:
+            current = greenlet.getcurrent()
+        return current in self._inside
+
+    def inside(self):
+        """Greenlets currently inside, owner included."""
+        return tuple(self._inside)
 
     def _routine_for(self, current):
         for run in getattr(self.runtime, "runs", {}).values():
@@ -196,44 +223,62 @@ class RunAdmissionMutex:
         return None, None
 
     def _admitted(self, current):
-        if self.owner_greenlet is None:
+        if self.owner_greenlet is None or self.owner_run is None:
             return False
-        # Klipper's mutex is not reentrant, but managed line boundaries may be
-        # dispatched from the same greenlet that owns the outer API/macro
-        # request.  This is the same serialized execution context, so count it
-        # as a nested bypass and let only the outermost exit release Klipper's
-        # real mutex.
-        if current is self.owner_greenlet:
-            return True
         run, routine = self._routine_for(current)
-        if run is None or routine is None:
-            return False
-        return (self.owner_run is not None and run is self.owner_run
+        return (run is self.owner_run and routine is not None
                 and routine.id != self.owner_routine_id
                 and routine.state in ("running", "waiting"))
 
-    def __enter__(self):
-        current = greenlet.getcurrent()
-        if self._admitted(current):
-            self._bypassed[current] = self._bypassed.get(current, 0) + 1
-            return self
-        self.original.__enter__()
+    def _set_owner(self, current):
         self.owner_greenlet = current
         self.owner_run, routine = self._routine_for(current)
         self.owner_routine_id = routine.id if routine is not None else None
+
+    def __enter__(self):
+        current = greenlet.getcurrent()
+        depth = self._inside.get(current, 0)
+        if depth:
+            # Managed line boundaries may be dispatched from a greenlet that
+            # is already inside (the outer API/macro/SD request, or a routine
+            # running a helper).  Klipper's mutex is not reentrant, so count
+            # the nesting and let only the outermost exit leave.
+            self._inside[current] = depth + 1
+            return self
+        if self._admitted(current):
+            self._inside[current] = 1
+            return self
+        self.original.__enter__()
+        # The real mutex is only handed over once every greenlet of the
+        # previous owner run has left, so nothing else is inside now.
+        self._inside = {current: 1}
+        self._set_owner(current)
         return self
 
     def __exit__(self, exc_type=None, exc_val=None, exc_tb=None):
         current = greenlet.getcurrent()
-        bypass_depth = self._bypassed.get(current, 0)
-        if bypass_depth:
-            if bypass_depth == 1:
-                self._bypassed.pop(current, None)
-            else:
-                self._bypassed[current] = bypass_depth - 1
+        depth = self._inside.get(current, 0)
+        if not depth:
+            if not self._inside:
+                # Untracked exit with nothing admitted: keep pass-through.
+                return self.original.__exit__(exc_type, exc_val, exc_tb)
+            logging.warning("gco-routines: ignoring G-code mutex exit from a "
+                            "greenlet that is not inside")
             return False
-        if current is self.owner_greenlet:
-            self.owner_greenlet = self.owner_run = self.owner_routine_id = None
+        if depth > 1:
+            self._inside[current] = depth - 1
+            return False
+        del self._inside[current]
+        if self._inside:
+            if current is self.owner_greenlet:
+                # Another greenlet of the same run is still executing a
+                # command: transfer ownership within the run, do not release.
+                successor = next(iter(self._inside))
+                _run, routine = self._routine_for(successor)
+                self.owner_greenlet = successor
+                self.owner_routine_id = routine.id if routine is not None else None
+            return False
+        self.owner_greenlet = self.owner_run = self.owner_routine_id = None
         return self.original.__exit__(exc_type, exc_val, exc_tb)
 
 

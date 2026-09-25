@@ -220,6 +220,12 @@ Hashes, checks and rollback are recorded in
   hardware explicitly.
 - Buffered motion may outlive command acceptance. Use the relevant existing
   Klipper completion barrier before `END` when physical completion is required.
+- Klipper's G-code mutex is released only when the last greenlet of the
+  owning run leaves it, so unrelated requests never run while a routine
+  command is in flight. The virtual-SD worker's between-line `test()` check
+  therefore also waits for an in-flight child command: raw-file default lines
+  overlap a child command only when they were already executing when it began
+  (commands inside one ordered macro, such as the OAMS `_TX`, are unaffected).
 - Managed macro sections must load after `[gco_routines]`; the plugin fails
   closed when it cannot retain their original source.
 - Managed Jinja statements must be on separate physical lines from output;
