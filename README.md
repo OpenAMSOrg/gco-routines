@@ -30,7 +30,7 @@ The implementation is validated locally against:
 - current upstream pin
   `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
 - real `SelectReactor` integration tests running locally on
-  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **390 tests passed** (including the
+  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **395 tests passed** (including the
   2026-09-25 review corrections, which are not yet deployed);
 - the Pi's actual Python 3.9.2/Jinja 3.1.6/greenlet 2.0.2 environment,
   using real Klippy and the OAMS macro file with inert hardware handlers.

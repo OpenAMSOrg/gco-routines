@@ -215,7 +215,7 @@ run on the printer or the Pi; they were not executed on Python 3.9 (grammar
 check only).
 
 ```bash
-.venv/bin/python -m pytest -q                              # 390 passed in 37.08s
+.venv/bin/python -m pytest -q                              # 395 passed in 37.07s
 .venv/bin/python -m pytest -q tests --ignore=tests/integration   # 227 passed in 1.05s
 .venv/bin/python -c "import ast,glob; [ast.parse(open(f).read(), f, feature_version=(3,9)) for f in glob.glob('klippy_extra/gco_routines/*.py')]"
 .venv/bin/python tools/smoke_klipper.py --klipper vendor/klipper --extra-parent klippy_extra --macros config/oams_macros.cfg           # PASS
