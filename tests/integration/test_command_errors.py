@@ -126,3 +126,35 @@ def test_internal_error_in_managed_macro_is_not_masked(klippy_env):
     run = next(run for run in env.manager.runs.values()
                if run.run_id.startswith("macro_calls_broken"))
     assert run.is_cancelled and "device driver bug" in run.fault
+
+
+@pytest.mark.parametrize("render_mode,script,recursive_routine", [
+    ("ordered", "REC", "macro_rec:0"),        # ordered macro from the API
+    (None, "START\nREC\nEND\nWAIT", "api_run:1"),  # legacy macro in a child
+])
+def test_managed_recursion_is_command_error(klippy_env, render_mode, script,
+                                            recursive_routine):
+    env = klippy_env
+    macro(env, "REC", "REC", render_mode=render_mode)
+    errors = execute(env, script)
+    assert len(errors) == 1 and isinstance(errors[0], env.gcode.error), errors
+    assert ("Macro REC called recursively within routine %s" % recursive_routine
+            in str(errors[0]))
+    assert not env.printer.is_shutdown()
+    # The failed invocation left no recursion entry or greenlet binding.
+    assert env.manager.recursion_tracker._stacks == {}
+    assert env.manager.get_bound_context() == (None, None)
+    assert all(not run.greenlet_to_rid for run in env.manager.runs.values())
+
+
+def test_non_recursive_helper_still_runs_after_recursion_error(klippy_env):
+    env = klippy_env
+    seen = []
+    env.gcode.register_command("MARK", lambda g: seen.append(g.get("V")))
+    macro(env, "REC", "REC", render_mode="ordered")
+    macro(env, "HELPER", "MARK V=helper")
+    macro(env, "TWICE", "HELPER\nHELPER", render_mode="ordered")
+    assert execute(env, "REC")
+    assert not execute(env, "TWICE")
+    assert seen == ["helper", "helper"]
+    assert not env.printer.is_shutdown()

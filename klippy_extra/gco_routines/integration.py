@@ -928,8 +928,14 @@ class IntegrationAdapter:
             else:
                 context = None
 
-            manager.recursion_tracker.enter(routine.id, obj.alias)
+            entered = False
             try:
+                # Managed recursion is tracked per routine.  A genuine
+                # recursive call is a command error ("Macro X called
+                # recursively ..."), as in stock Klipper, never an internal
+                # error; it also unwinds an owned run like any other failure.
+                manager.recursion_tracker.enter(routine.id, obj.alias)
+                entered = True
                 params = dict(obj.variables)
                 params.update(obj.template.create_template_context())
                 params["params"] = gcmd.get_command_parameters()
@@ -957,7 +963,8 @@ class IntegrationAdapter:
                     run.cancel_run(str(exc) or type(exc).__name__)
                 raise
             finally:
-                manager.recursion_tracker.exit(routine.id, obj.alias)
+                if entered:
+                    manager.recursion_tracker.exit(routine.id, obj.alias)
                 if context is not None:
                     context.__exit__(None, None, None)
 
