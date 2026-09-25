@@ -48,7 +48,7 @@ class _LoadCommand:
         return RuntimeError(message)
 
 
-def _virtual_sd(env, directory):
+def _virtual_sd(env, directory, on_error_gcode=None):
     vsd = virtual_sdcard.VirtualSD.__new__(virtual_sdcard.VirtualSD)
     vsd.printer = env.printer
     vsd.gcode = env.gcode
@@ -61,6 +61,8 @@ def _virtual_sd(env, directory):
     vsd.executor = _SyncExecutor()
     vsd.print_stats = _PrintStats()
     vsd.do_resume = lambda: None
+    if on_error_gcode is not None:
+        vsd.on_error_gcode = on_error_gcode
     env.printer.add_object("virtual_sdcard", vsd)
     env.manager.adapter._hook_virtual_sdcard(vsd)
     return vsd

@@ -53,3 +53,9 @@ G-code syntax and do not make the slicer evaluate printer state to validate a bl
   `BlockCollector` without retaining ordinary lines; per-block limits and all
   structural errors are unchanged, plus a 16 Mi-character physical-line sanity
   bound. `parse_program` remains the parser for (small) complete API scripts.
+- The implicit end-of-file join is an SD command, like an explicit final
+  WAIT line: it holds the G-code mutex and sets the virtual-SD `cmd_from_sd`
+  flag through its error cleanup. Previously it ran outside the mutex, so a
+  PAUSE could take the mutex and spin in `do_pause()` waiting for a worker
+  that was waiting for children queued behind that PAUSE (and an API cancel
+  deadlocked the same way through `on_error_gcode`).

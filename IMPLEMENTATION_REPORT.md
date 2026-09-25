@@ -206,7 +206,10 @@ the G-code mutex is held until a run's last in-flight command returns;
 PAUSE suspends admitted children instead of faulting the run; a transient
 run no longer displaces a running file print in status; virtual-SD
 preflight streams files with no size limit; and compatibility errors are
-configuration errors (plus small cleanups). Design corrections are recorded
+configuration errors (plus small cleanups). Follow-ups restore raw-file
+default-routine overlap with in-flight child commands (without letting
+unrelated requests interleave) and make the implicit end-of-file join
+behave like an explicit WAIT line, fixing PAUSE/cancel deadlocks there. Design corrections are recorded
 in `docs/decisions.md`. These changes were **not** deployed, installed, or
 run on the printer or the Pi; they were not executed on Python 3.9 (grammar
 check only).
@@ -261,13 +264,17 @@ fails there (except guards that pin unchanged behavior).
   Commands already executing complete. Children are not suspended while a
   routine of the same run waits inside the G-code mutex, because Klipper could
   not accept RESUME until that wait ends.
-- Known pre-existing limitation (reproduced unchanged on the previous
-  revision): an external PAUSE accepted while the virtual-SD worker performs
-  the implicit end-of-file join, or a PAUSE issued by a child during that
-  join, blocks in Klipper's `do_pause()` waiting for the worker, which waits
-  for the child. The API `pause_resume/cancel` endpoint, shutdown or `M112`
-  recover; console `CANCEL_PRINT` cannot enter. End files with an explicit
-  `WAIT` to avoid it until the join is made a mutex-holding SD command.
+- The implicit end-of-file join behaves like an explicit final `WAIT` line:
+  the virtual-SD worker holds the G-code mutex (the run's children are
+  admitted) with the file's `cmd_from_sd` flag set, through its error
+  cleanup. A console or API `PAUSE`, or console `CANCEL_PRINT`, issued during
+  it queues until the join finishes; the print then completes and `PAUSE`
+  applies to the idle printer. `send_pause_command()` (filament runout)
+  returns at once instead of spinning in `do_pause()`. The API
+  `pause_resume/cancel` endpoint (used by Moonraker) and shutdown/disconnect
+  cancel the join immediately; an in-flight native child command still
+  completes, no later child command runs, and the print ends cancelled.
+  (Previously PAUSE or an API cancel during the join could deadlock.)
 - `get_status()` reports a running virtual-SD/file print even while a
   transient API-script or ordered-macro run executes; after the print ends it
   stays the reported run until the next run starts.

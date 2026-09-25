@@ -174,7 +174,10 @@ Jinja `default` filter is used explicitly.
   `M23`/`M24` and `SDCARD_PRINT_FILE`, and performs an implicit join before EOF
   can be reported as successful. Preflight streams the file with bounded
   memory; there is no file-size limit (each `START` block is limited to
-  100,000 lines / 2 MB).
+  100,000 lines / 2 MB). The implicit join behaves like an explicit final
+  `WAIT` line: console/API `PAUSE` and console `CANCEL_PRINT` queue until it
+  finishes (the print then completes), while the API cancel endpoint used by
+  Moonraker and shutdown cancel it immediately.
 - Generated controls from legacy macros or rendered expressions are rejected.
 - Interactive pseudo-TTY control blocks and line-number-framed controls are
   rejected because their complete source boundary is unavailable.
@@ -185,9 +188,9 @@ Jinja `default` filter is used explicitly.
   the pending command. A command already executing (including the commands of
   a helper macro it called) completes, as stock Klipper completes a running
   macro. While a routine of the same run holds Klipper's G-code mutex inside
-  `WAIT` (an API script, ordered macro, or file `WAIT` line), Klipper cannot
-  accept `RESUME`, so children continue until that wait ends instead of
-  deadlocking. Cancel, reset, shutdown, and disconnect invalidate active runs
+  `WAIT` (an API script, ordered macro, file `WAIT` line, or the implicit
+  end-of-file join), Klipper cannot accept `RESUME`, so children continue
+  until that wait ends instead of deadlocking. Cancel, reset, shutdown, and disconnect invalidate active runs
   and wake suspended waits and suspended children, which end cancelled.
 - Unrelated external requests retain normal Klipper mutex serialization; only
   routines belonging to the lock owner's run receive cooperative admission.

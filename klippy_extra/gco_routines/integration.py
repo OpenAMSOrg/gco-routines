@@ -7,7 +7,7 @@ import inspect
 import logging
 import os
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
@@ -268,20 +268,58 @@ class ManagedFileWrapper:
         self.printer = printer
         self._eof_joined = False
 
+    def _virtual_sd(self):
+        if self.printer is None:
+            return None
+        return self.printer.lookup_object("virtual_sdcard", None)
+
+    def _gcode_mutex(self):
+        gcode = getattr(self.runtime, "gcode", None)
+        if gcode is None and self.printer is not None:
+            gcode = self.printer.lookup_object("gcode", None)
+        get_mutex = getattr(gcode, "get_mutex", None)
+        return get_mutex() if callable(get_mutex) else nullcontext()
+
+    @contextmanager
+    def _as_sd_command(self, vsd):
+        """Mark the implicit final WAIT as the command the file is running.
+
+        Set before queueing for the mutex and kept through error cleanup, as
+        for an explicit WAIT line: Klipper's do_pause() then returns at once
+        instead of spinning until the worker stops (which it cannot while
+        the join waits for children).
+        """
+        if vsd is None or not hasattr(vsd, "cmd_from_sd"):
+            yield
+            return
+        previous = vsd.cmd_from_sd
+        vsd.cmd_from_sd = True
+        try:
+            yield
+        finally:
+            vsd.cmd_from_sd = previous
+
     def read(self, size=-1):
         data = self.raw_file.read(size)
         if not data and not self._eof_joined:
-            try:
-                self.collector.assert_closed()
-                run = self.runtime.runs.get(self.source_id)
-                if run is None:
-                    self.runtime.finish_active_run()
-                else:
-                    with self.runtime.default_context(run):
-                        self.runtime.finish_active_run()
-            except Exception as e:
-                if self.printer is not None:
-                    vsd = self.printer.lookup_object("virtual_sdcard", None)
+            vsd = self._virtual_sd()
+            with self._as_sd_command(vsd):
+                try:
+                    self.collector.assert_closed()
+                    run = self.runtime.runs.get(self.source_id)
+                    if run is None:
+                        with self._gcode_mutex():
+                            self.runtime.finish_active_run()
+                    else:
+                        with self.runtime.default_context(run):
+                            # Hold the G-code mutex like an explicit final
+                            # WAIT line: the worker becomes the owner (or is
+                            # admitted if a child currently owns it), so the
+                            # run's children keep running while unrelated
+                            # requests such as PAUSE queue until the join ends.
+                            with self._gcode_mutex():
+                                self.runtime.finish_active_run()
+                except Exception as e:
                     if vsd is not None and hasattr(vsd, "print_stats"):
                         vsd.print_stats.note_error(str(e))
                         template = getattr(vsd, "on_error_gcode", None)
@@ -290,7 +328,7 @@ class ManagedFileWrapper:
                                 vsd.gcode.run_script(template.render())
                             except Exception:
                                 logging.exception("gco-routines EOF error cleanup")
-                raise
+                    raise
             self._eof_joined = True
         return data
 
