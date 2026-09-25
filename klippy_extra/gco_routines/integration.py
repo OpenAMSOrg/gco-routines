@@ -620,8 +620,27 @@ class IntegrationAdapter:
         finally:
             self._pop_mode()
 
-    def dispatch_managed_line(self, line):
+    def dispatch_managed_line(self, line, run=None, routine=None):
         """Dispatch one compiler/child-owned literal boundary."""
+        mutex = self._owner_mutex
+        if (mutex is not None and run is not None and routine is not None
+                and routine.id != run.default_id and not mutex.holds()):
+            # A child's own command boundary.  Decide pause suspension and
+            # admit the command under the G-code mutex, atomically, so a
+            # PAUSE accepted while this child queued is honored.
+            pause_blocks = getattr(self.runtime, "pause_blocks", None)
+            while True:
+                with mutex:
+                    if not callable(pause_blocks) or not pause_blocks(run, routine):
+                        return self._dispatch_literal(line)
+                # Suspend only outside the mutex: a suspended routine must
+                # never keep Klipper from accepting RESUME or CANCEL_PRINT.
+                self.runtime.suspend_for_pause(run, routine)
+        # Nested boundaries (inside a command already executing) and the
+        # default routine are not suspended, as in stock Klipper.
+        return self._dispatch_literal(line)
+
+    def _dispatch_literal(self, line):
         self._push_mode("managed_literal")
         try:
             return self._orig_run_script(line)

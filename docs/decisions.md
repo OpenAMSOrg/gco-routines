@@ -33,3 +33,17 @@ G-code syntax and do not make the slicer evaluate printer state to validate a bl
   shut Klipper down); the two tests asserting `ValueError` were corrected.
   Ordered-macro Jinja evaluation errors remain command errors, as stock Klipper
   reports legacy render errors.
+- Pause suspends admitted children instead of faulting the run. Previously an
+  admitted child's next command failed with "Routine command admission is
+  paused", and the resulting run fault cancelled the default routine so the
+  print could not be resumed. Now a paused run still rejects new routines, but
+  an admitted child that reaches its own next command boundary suspends
+  cooperatively (a reactor completion, outside the G-code mutex so RESUME and
+  CANCEL_PRINT can always be accepted) until RESUME/CLEAR_PAUSE, then
+  continues. Cancel/reset/shutdown wake and cancel it. Commands nested in a
+  command already executing complete, as stock Klipper completes a running
+  macro after PAUSE. Children are not suspended while a routine of the same
+  run holds the G-code mutex inside WAIT, which would otherwise deadlock
+  (RESUME cannot be accepted until that wait ends). Status keeps the schema:
+  a suspended child is `waiting` with empty `waiting_on` and detail
+  `{"suspended": "paused"}`.

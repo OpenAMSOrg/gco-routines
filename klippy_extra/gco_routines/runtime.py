@@ -100,6 +100,8 @@ class Routine:
     greenlet: Any = None
     completion: Any = None
     generation: int = 0
+    # Why a running routine is suspended at a command boundary (e.g. "paused").
+    suspended: Optional[str] = None
     _frames: Dict[Any, List[CommandFrame]] = field(default_factory=dict,
                                                     repr=False)
 
@@ -507,13 +509,25 @@ class Run:
             # directly to a Routine; normalize those too before publication.
             return thaw(freeze(thaw(value)))
 
+        def published(r):
+            # A routine suspended at a command boundary (for example while
+            # the printer is paused) is published as waiting on nothing,
+            # with the reason in detail and its pending command in command.
+            if r.suspended and r.state == "running":
+                return "waiting", {"suspended": r.suspended}
+            return r.state, detached(r.detail)
+
+        routines = []
+        for r in self.routines.values():
+            state, detail = published(r)
+            routines.append({
+                "id": r.id, "name": r.name, "state": state,
+                "command": r.command, "source": detached(r.source),
+                "waiting_on": list(r.targets), "detail": detail,
+                "result": detached(r.result), "error": r.error,
+            })
         return {"schema_version": 1, "run_id": self.run_id,
                 "revision": self.revision, "fault": self.fault,
-                "routines": [{
-                    "id": r.id, "name": r.name, "state": r.state,
-                    "command": r.command, "source": detached(r.source),
-                    "waiting_on": list(r.targets), "detail": detached(r.detail),
-                    "result": detached(r.result), "error": r.error,
-                } for r in self.routines.values()]}
+                "routines": routines}
 
     get_status = snapshot

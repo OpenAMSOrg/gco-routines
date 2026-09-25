@@ -226,6 +226,18 @@ Hashes, checks and rollback are recorded in
   therefore also waits for an in-flight child command: raw-file default lines
   overlap a child command only when they were already executing when it began
   (commands inside one ordered macro, such as the OAMS `_TX`, are unaffected).
+- Pause rejects new routines and suspends each admitted child at its next own
+  command boundary until RESUME/CLEAR_PAUSE (cancel/reset/shutdown cancel it).
+  Commands already executing complete. Children are not suspended while a
+  routine of the same run waits inside the G-code mutex, because Klipper could
+  not accept RESUME until that wait ends.
+- Known pre-existing limitation (reproduced unchanged on the previous
+  revision): an external PAUSE accepted while the virtual-SD worker performs
+  the implicit end-of-file join, or a PAUSE issued by a child during that
+  join, blocks in Klipper's `do_pause()` waiting for the worker, which waits
+  for the child. The API `pause_resume/cancel` endpoint, shutdown or `M112`
+  recover; console `CANCEL_PRINT` cannot enter. End files with an explicit
+  `WAIT` to avoid it until the join is made a mutex-holding SD command.
 - Managed macro sections must load after `[gco_routines]`; the plugin fails
   closed when it cannot retain their original source.
 - Managed Jinja statements must be on separate physical lines from output;

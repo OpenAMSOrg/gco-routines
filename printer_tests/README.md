@@ -128,8 +128,8 @@ before cold lifecycle tests. Never use these tests during feeding or a real prin
 
 | Action while pending | Required observation |
 | --- | --- |
-| Pause | No new child command after pause; an already admitted probe may finish. A new spawning macro must reject while paused. The old run may fault at its next admission boundary; do not assume it can be resumed successfully |
-| Resume after pause | Follow the existing recovery policy; after clearing pause, a **new** `GCO_TEST_RESULTS` invocation can run. No stale old tail may revive |
+| Pause | No new routine may start; a new spawning macro must reject while paused. An already admitted probe command may finish; the child then suspends at its next own command boundary (status `waiting`, detail `suspended: paused`) instead of faulting the run |
+| Resume after pause | Follow the existing recovery policy. After RESUME/CLEAR_PAUSE the suspended child continues and the old run can complete; a **new** `GCO_TEST_RESULTS` invocation can run. After CANCEL_PRINT the suspended child ends cancelled and no stale old tail may revive |
 | Cancel through printer UI/API | Waiting caller unwinds; child/parent tail markers absent; no false file completion. Wait past the original ten seconds and check again |
 | Reset virtual SD / cancel-and-new-file | Old instance IDs/tails never become the new file's work; run the EOF fixture again |
 | RESTART / FIRMWARE_RESTART | Intentionally disrupts Klipper. After ready, no old run survives; rehome before motion and rerun no-motion preflight |

@@ -24,6 +24,8 @@ class GcoRoutinesManager:
         self.active_run_id: Optional[str] = None
         self._run_sequence = 0
         self.admissions_paused = False
+        # Routines suspended at a command boundary: routine id -> (run, routine).
+        self._suspended = {}
         self.recursion_tracker = MacroRecursionTracker()
         self.driver_api = DriverAPI(self)
         self._command_frames = {}
@@ -250,16 +252,77 @@ class GcoRoutinesManager:
         if run.is_cancelled or run.fault is not None:
             raise ContractError("Cannot dispatch command: run is cancelled or faulted")
         with run.routine_context(routine):
-            return self.adapter.dispatch_managed_line(cmd_text)
+            return self.adapter.dispatch_managed_line(cmd_text, run, routine)
 
     def check_execution(self, run, routine):
-        """Check at every command boundary, including called legacy macros."""
+        """Check at every command boundary, including called legacy macros.
+
+        Pause is not checked here: an admitted child suspends at its own next
+        command boundary instead (see ``pause_blocks``), and commands nested
+        in a command already executing complete, as in stock Klipper.
+        """
         try:
             run.check_active(routine.id)
-            if self.admissions_paused and routine.id != run.default_id:
-                raise ContractError("Routine command admission is paused")
         except ContractError as exc:
             raise self.gcode.error(str(exc))
+
+    def pause_blocks(self, run, routine) -> bool:
+        """True if a child must suspend before its next own command.
+
+        Called with the G-code mutex held.  While a routine of the same run
+        holds that mutex in WAIT (an API script, ordered macro, file WAIT line
+        or nested helper waiting on children), Klipper cannot accept RESUME
+        until the wait ends, so suspending would deadlock: the child then
+        continues and suspends at a later boundary.
+        """
+        if not self.admissions_paused or routine.id == run.default_id:
+            return False
+        mutex = getattr(self.adapter, "_owner_mutex", None)
+        current = greenlet.getcurrent()
+        for other_g in (mutex.inside() if mutex is not None else ()):
+            if other_g is current:
+                continue
+            other = run.get_routine_by_greenlet(other_g)
+            if other is not None and other.state == "waiting":
+                return False
+        return True
+
+    def suspend_for_pause(self, run, routine):
+        """Cooperatively suspend a child (outside the G-code mutex).
+
+        Woken by RESUME/CLEAR_PAUSE, by a mutex-holding routine of the same
+        run starting a WAIT, or by cancel/reset/shutdown/failure, which
+        complete the routine's completion and leave it cancelled.
+        """
+        # The run may have been cancelled while this child queued for the
+        # mutex; never suspend on a completion that nothing will complete.
+        run.check_active(routine.id)
+        routine.suspended = "paused"
+        routine.completion = run._new_completion()
+        self._suspended[routine.id] = (run, routine)
+        run.revision += 1
+        try:
+            routine.completion.wait()
+        finally:
+            self._suspended.pop(routine.id, None)
+            routine.suspended = None
+            run.revision += 1
+        run.check_active(routine.id)
+
+    def _wake_suspended(self, run=None):
+        for owner, routine in tuple(self._suspended.values()):
+            if run is not None and owner is not run:
+                continue
+            completion = routine.completion
+            if completion is not None and not completion.test():
+                completion.complete(None)
+
+    def _before_blocking_wait(self, run):
+        # A routine about to block while holding the G-code mutex must not
+        # wait on children suspended for pause: RESUME cannot be accepted.
+        mutex = getattr(self.adapter, "_owner_mutex", None)
+        if self._suspended and mutex is not None and mutex.holds():
+            self._wake_suspended(run)
 
     def check_spawn(self):
         if self.admissions_paused:
@@ -270,6 +333,7 @@ class GcoRoutinesManager:
         routine.command = f"WAIT ON={','.join(targets)}" if targets else "WAIT"
         satisfied = run.wait(routine.id, targets)
         if not satisfied:
+            self._before_blocking_wait(run)
             # Yield greenlet until dependencies complete
             res = routine.completion.wait()
             if run.fault:
@@ -341,6 +405,7 @@ class GcoRoutinesManager:
         # Bare wait on all outstanding background routines
         satisfied = run.wait(default_r.id, None)
         if not satisfied:
+            self._before_blocking_wait(run)
             default_r.completion.wait()
         if run.fault:
             raise self.gcode.error("Run faulted before completion: %s" %
@@ -362,6 +427,8 @@ class GcoRoutinesManager:
 
     def set_paused(self, paused: bool):
         self.admissions_paused = bool(paused)
+        if not self.admissions_paused:
+            self._wake_suspended()
 
     # Command handlers
     def _direct_control_error(self, gcmd):

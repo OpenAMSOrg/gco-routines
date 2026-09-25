@@ -175,8 +175,17 @@ Jinja `default` filter is used explicitly.
 - Generated controls from legacy macros or rendered expressions are rejected.
 - Interactive pseudo-TTY control blocks and line-number-framed controls are
   rejected because their complete source boundary is unavailable.
-- Pause prevents new child admission. Cancel, reset, shutdown, and disconnect
-  invalidate active runs and wake suspended waits.
+- Pause rejects new routine admission (`START`). An already admitted child
+  that reaches its next own command boundary while paused suspends
+  cooperatively until `RESUME` or `CLEAR_PAUSE`, then continues; its status is
+  `waiting` with empty `waiting_on`, `detail` `{"suspended": "paused"}` and
+  the pending command. A command already executing (including the commands of
+  a helper macro it called) completes, as stock Klipper completes a running
+  macro. While a routine of the same run holds Klipper's G-code mutex inside
+  `WAIT` (an API script, ordered macro, or file `WAIT` line), Klipper cannot
+  accept `RESUME`, so children continue until that wait ends instead of
+  deadlocking. Cancel, reset, shutdown, and disconnect invalidate active runs
+  and wake suspended waits and suspended children, which end cancelled.
 - Unrelated external requests retain normal Klipper mutex serialization; only
   routines belonging to the lock owner's run receive cooperative admission.
   Klipper's G-code mutex stays held while any command of that run is in
