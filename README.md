@@ -21,6 +21,12 @@ The default routine continues after `END`; the child runs cooperatively on
 Klipper's reactor. `WAIT` suspends only its caller. A bare `WAIT` joins all of
 that caller's outstanding children in `START` order.
 
+## User guide
+
+Start with the [user guide](docs/guide/README.md): [install](docs/guide/install.md),
+[language](docs/guide/language.md), [OpenAMS](docs/guide/openams.md) and
+[troubleshooting](docs/guide/troubleshooting.md).
+
 ## Current validation status
 
 The implementation is validated locally against:
