@@ -1,0 +1,56 @@
+// gco-routines: a routine's states, the run fault, and handled regions.
+// Render: dot -Tsvg routine-states.dot -o routine-states.svg
+// Source of truth: klippy_extra/gco_routines/runtime.py (Run, Routine) and docs/decisions.md.
+digraph routines {
+  graph [rankdir=TB, newrank=true, nodesep=0.45, ranksep=0.45, pad=0.3, fontname="Helvetica", fontsize=13, bgcolor="white",
+         label=<<b>gco-routines: routine states, the run fault, and handled regions</b><br/><font point-size="11">every routine of a run, the default one included</font>>,
+         labelloc=t, labeljust=l];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, margin="0.14,0.07", penwidth=1.3,
+        fillcolor="#f0f1f4", color="#8a919b"];
+  edge [fontname="Helvetica", fontsize=10, color="#5f6670", fontcolor="#3c4148", arrowsize=0.7];
+
+  start     [shape=box, style="filled,bold", fillcolor="#ffffff", color="#2b2f36",
+             label=<<b>START</b> … <b>END</b><br/><font point-size="10">admits a background routine (not while paused)</font>>];
+  running   [fillcolor="#dceafe", color="#2f6fd0", label=<<b>running</b><br/><font point-size="10">executes its commands in order</font>>];
+  waiting   [fillcolor="#fff6cc", color="#b8900a", label=<<b>waiting</b><br/><font point-size="10">in WAIT, until its targets complete</font>>];
+  suspended [fillcolor="#fff6cc", color="#b8900a", style="rounded,filled,dashed",
+             label=<<b>waiting</b>, detail <font face="Courier">suspended: paused</font><br/><font point-size="10">a background routine at its next command<br/>boundary while the printer is paused</font>>];
+  completed [fillcolor="#e2f5e7", color="#2e8b4e", label=<<b>completed</b><br/><font point-size="10">result retained until collected or reused</font>>];
+  failed    [fillcolor="#fde2e2", color="#c62828", label=<<b>failed</b><br/><font point-size="10">a command raised</font>>];
+  cancelled [fillcolor="#e9ecef", color="#8a919b", label=<<b>cancelled</b><br/><font point-size="10">cancel, reset, shutdown, or the run's fault</font>>];
+  fault     [shape=box, style="rounded,filled,bold", fillcolor="#fde2e2", color="#c62828",
+             label=<<b>The run is faulted</b><br/><font point-size="10">every other running or waiting routine is cancelled;<br/>every later command raises "Run is faulted";<br/>in a print, Klipper runs on_error_gcode and the print ends</font>>];
+
+  start -> running;
+  running -> waiting [label=" WAIT"];
+  waiting -> running [label=" targets completed"];
+  running -> suspended [label=" PAUSE"];
+  suspended -> running [label=" RESUME"];
+  running -> completed [label=" end of its body"];
+  running -> failed [label=" a command raised"];
+  failed -> fault [label=" outside a handled region", color="#c62828", fontcolor="#c62828"];
+  fault -> cancelled [label=" all the others", style=dashed];
+
+  subgraph cluster_handled {
+    label=<<b>Inside a handled region</b> (<font face="Courier">handled_errors()</font>, opened by another extra's command)>; labeljust=l;
+    style="rounded,filled"; fillcolor="#f2faf4"; color="#2e8b4e";
+    owner_err [fillcolor="#ffffff", color="#2e8b4e",
+               label=<<b>The owner's own command raised</b><br/><font point-size="10">the error reaches the owner as an ordinary<br/>G-code error; the run is not faulted</font>>];
+    child_err [fillcolor="#ffffff", color="#2e8b4e",
+               label=<<b>A routine it started failed</b><br/><font point-size="10">it fails alone; no other routine is cancelled;<br/>the WAIT of a routine waiting on it raises</font>>];
+    leaves    [fillcolor="#ffffff", color="#2e8b4e",
+               label=<<b>An error leaves the region</b><br/><font point-size="10">its unfinished routines are cancelled (an in-flight<br/>command finishes, nothing later runs)</font>>];
+    retired   [fillcolor="#ffffff", color="#2e8b4e",
+               label=<<b>On leaving, failed and cancelled routines are retired</b><br/><font point-size="10">neither a bare WAIT nor the run's final wait waits for them</font>>];
+    absorbed  [shape=hexagon, style="filled", fillcolor="#fff6cc", color="#b8900a",
+               label=<The owner handles it?>];
+    goes_on   [fillcolor="#e2f5e7", color="#2e8b4e", style="rounded,filled,bold",
+               label=<<b>The run goes on</b><br/><font point-size="10">for example, OpenAMS pauses the print,<br/>and RESUME continues the file</font>>];
+    owner_err -> leaves; child_err -> leaves [style=dashed, label=" through the owner's WAIT"];
+    leaves -> retired -> absorbed;
+    absorbed -> goes_on [label=" yes"];
+  }
+  failed -> owner_err [label=" the region's owner", color="#2e8b4e", fontcolor="#2e8b4e"];
+  failed -> child_err [label=" started in the region", color="#2e8b4e", fontcolor="#2e8b4e"];
+  absorbed -> fault [label=" no: where gco-routines next sees it", color="#c62828", fontcolor="#c62828"];
+}

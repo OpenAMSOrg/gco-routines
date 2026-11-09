@@ -226,6 +226,41 @@ git -C vendor/klipper diff --exit-code; git -C vendor/klipper-upstream diff --ex
 Each new regression test was also run against the previous revision and
 fails there (except guards that pin unchanged behavior).
 
+### Handled regions (2026-11-08, local only)
+
+Why: on the owner's printer (voron350, OpenAMS with the overlapped toolchange),
+a toolchange failure injected after the feed ended the print. OpenAMS's new
+`OAMSM_TOOLCHANGE` caught the error to pause the print, but `dispatch_checked`
+had already faulted the virtual-SD run at the failing line, so the handler's
+`RESTORE_GCODE_STATE` and `PAUSE` raised "Run is faulted" and the print ended
+through `on_error_gcode` (klippy.log of that run). Design: docs/decisions.md,
+"Design addition: handled regions".
+
+Changes: `Run.handled_errors(rid)`, `Run.is_handled()`, `Routine.handled_by` /
+`retired` / `dependency_error` in `runtime.py`; `fail_routine` ignores the
+owner's own errors and fails a region's routine alone; bare WAIT and run
+completion skip retired routines; `GcoRoutinesManager.handled_errors()` and
+WAIT/join reporting of a failure that happened alone in `__init__.py`. No
+change to the grammar, the status schema or any upstream file.
+
+```bash
+.venv/bin/python -m pytest -q tests/test_handled_errors.py                      # 9 passed
+.venv/bin/python -m pytest -q tests/integration/test_handled_errors_print.py    # 6 passed
+.venv/bin/python -m pytest -q                                                   # 410 passed in 37.44s
+```
+
+The integration cases run a real virtual-SD print whose host command runs an
+ordered macro (background feed, cleaning, WAIT, reload) under the region: a
+failure of the feed, the cleaning or the reload pauses the print and RESUME
+completes it, with `fault` null; without the region the same failure ends the
+print; an error the host does not absorb still faults the run; a clean run
+still overlaps the feed and the cleaning.
+
+Outstanding: not yet run on the printer with gco-routines enabled (the
+OpenAMS side was bench-tested with gco-routines disabled on 2026-11-08). A
+routine cancelled with its region does not stop its in-flight command; OpenAMS
+reads the AMS's actual state on RESUME.
+
 ## Operational limits
 
 - After the FPS hardware fix, the initial T2 load, T2-to-T3 and T3-to-T2

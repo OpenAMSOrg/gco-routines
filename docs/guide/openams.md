@@ -17,7 +17,7 @@ to multitasking.
 
 ### When it overlaps
 
-`_TX` renders `START` only when every condition below holds. The last four are
+`_TX` renders `START` only when every condition below holds. The last three are
 checked after the cut, retraction and unload, not at the start of the macro.
 
 | Condition | Where `_TX` checks it |
@@ -26,7 +26,6 @@ checked after the cut, retraction and unload, not at the start of the macro.
 | `[gco_routines]` is loaded | `'gco_routines' in printer` |
 | `_TX` is in ordered mode | `render_mode` of `gcode_macro _tx` is `ordered` in the config (the overlay file does this) |
 | The printer is not paused | `printer.pause_resume.is_paused` is false |
-| No earlier load failure is pending | `_TX`'s `pause_triggered` variable is false |
 | The lane is empty after the unload | The group loaded on the group's lane is `none`. With no lane resolved, `oams_manager.current_group` is `none` |
 
 If any one fails, `_TX` runs serially: OpenAMS load, a one-second settle,
@@ -75,7 +74,32 @@ Never include the overlay without `[gco_routines]`: stock Klipper rejects
 | Pause arrives during the unload | The toolchange runs serially, and the helper stops it before loading. |
 | Lane still holds a group after the unload | The toolchange runs serially. The serial helper then stops with an error rather than loading onto a loaded lane. |
 | Pause during the overlap | No new routine starts. The toolchange stops before the toolhead reload. |
+| Anything in the toolchange fails during a print (a check, the AMS, `CLEAN_NOZZLE`, a hook, the reload) | The print pauses; it does not end. `RESUME` finishes the toolchange from where it stopped. See [When a toolchange fails](#when-a-toolchange-fails). |
 | Extension or overlay missing | The same macros run every step serially and never render `START`, `END` or `WAIT`. |
+
+### When a toolchange fails
+
+OpenAMS runs every toolchange inside `OAMSM_TOOLCHANGE`, which opens a
+gco-routines *handled region* (`handled_errors()`) around the macro chain. A
+failure anywhere in it, including the background load and the cleaning that
+overlaps it, reaches `OAMSM_TOOLCHANGE` instead of faulting the run.
+`OAMSM_TOOLCHANGE` records the failure, puts the toolhead back where the
+toolchange started, and runs `PAUSE`; the print waits. Fix the cause and press
+**RESUME**: OpenAMS clears the AMS's faults, works out where the lane is, runs
+only what is left, and the file continues. If that fails, the print stays paused.
+
+![A routine's states, the run fault, and handled regions](../images/routine-states.svg)
+
+If the background load fails, it fails alone and the `WAIT` that joins it
+reports the failure. If the cleaning fails while the load still runs, the region
+cancels the load's routine: the AMS finishes the load it was given, and nothing
+after it runs. OpenAMS's RESUME then sees what the AMS actually did.
+
+This needs both sides: gco-routines with handled regions (this version) and an
+OpenAMS with `OAMSM_TOOLCHANGE` (2026-11-08 or later). With an older
+gco-routines, OpenAMS cannot keep the run alive, and a failed toolchange ends the
+print as before. The whole OpenAMS sequence is drawn in its guide's
+[How the macros run](https://github.com/OpenAMSOrg/openams/blob/main/docs/guide/macro-sequence.md).
 
 Call `T0` to `T19` and `OPENAMS_LOAD` from ordinary G-code only. They own their
 background routine, so never put them inside another `START` block.

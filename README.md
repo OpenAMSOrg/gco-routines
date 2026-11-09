@@ -36,8 +36,9 @@ The implementation is validated locally against:
 - current upstream pin
   `ad425fc22e01ca05db4852a81dfa9dab17373ff8`;
 - real `SelectReactor` integration tests running locally on
-  Python 3.12/Jinja 3.1.6/greenlet 3.3.2: **395 tests passed** (including the
-  2026-09-25 review corrections, which are not yet deployed);
+  Python 3.12/Jinja 3.1.6/greenlet 3.5.6: **410 tests passed** (including the
+  2026-09-25 review corrections and the 2026-11-08 handled regions, which are
+  not yet deployed);
 - the Pi's actual Python 3.9.2/Jinja 3.1.6/greenlet 2.0.2 environment,
   using real Klippy and the OAMS macro file with inert hardware handlers.
 
@@ -220,6 +221,12 @@ Use the existing Klipper barrier required by the underlying command (for
 example, `M400`) before `END` when physical completion matters. Concurrent
 commands still share the same printer hardware and must be synchronized by the
 author.
+
+- Another extra may run commands in a *handled region*
+  (`printer.lookup_object("gco_routines").handled_errors()`): an error of its
+  own commands reaches it instead of faulting the run, and a routine it starts
+  fails alone. An error it does not handle faults the run as usual. See
+  `docs/decisions.md` (2026-11-08) and `docs/images/routine-states.svg`.
 
 ## Single-FPS OpenAMS macros
 

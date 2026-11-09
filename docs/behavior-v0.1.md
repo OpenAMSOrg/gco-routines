@@ -281,7 +281,9 @@ M117 Ready
 ; MUST NOT execute on that failure: the wait cannot report success.
 ```
 
-An unrecoverable routine error faults/holds the run immediately through the host's existing failure path. Dependent waits report failure, not success. Already-running hardware follows its defined safety handling; a software wait ending does not prove the actuator stopped. Cancellation/shutdown uses existing host controls and prevents orphaned routine execution.
+An unrecoverable routine error faults/holds the run immediately through the host's existing failure path. Dependent waits report failure, not success.
+
+A recoverable error is one a host component handles itself. Another extra's command declares it with a handled region (`handled_errors()`, decisions.md, 2026-11-08): an error of the owner's own commands reaches the owner instead of faulting the run, and a routine the owner starts fails alone, its waiters' WAIT failing with the reason. When an error leaves the region, its unfinished routines are cancelled; its failed and cancelled routines are retired from bare waits and the final wait. An error the owner does not handle faults the run as above. The states are drawn in [`docs/images/routine-states.svg`](images/routine-states.svg). Already-running hardware follows its defined safety handling; a software wait ending does not prove the actuator stopped. Cancellation/shutdown uses existing host controls and prevents orphaned routine execution.
 
 Run completion includes an implicit final wait for outstanding work. Macro return alone is not run completion. Results are not persistent across a controller restart.
 

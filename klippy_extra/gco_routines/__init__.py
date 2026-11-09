@@ -327,6 +327,36 @@ class GcoRoutinesManager:
             res = routine.completion.wait()
             if run.fault:
                 raise self.gcode.error(f"Run faulted: {run.fault}")
+            self._raise_handled_failure(routine)
+
+    def _raise_handled_failure(self, routine: Routine):
+        """A WAIT woken by a target that failed alone inside a handled region,
+        or a waiter cancelled with its region, reports that failure."""
+        message = routine.dependency_error
+        if message is not None:
+            routine.dependency_error = None
+            raise self.gcode.error(message)
+        if routine.state in ("failed", "cancelled"):
+            raise self.gcode.error("Routine %s %s: %s" % (
+                routine.name or routine.id, routine.state, routine.error))
+
+    @contextmanager
+    def handled_errors(self):
+        """Run commands whose errors the caller handles itself.
+
+        For another extra's command handler (OpenAMS's OAMSM_TOOLCHANGE, for
+        one): ``with gco_routines.handled_errors(): run_script(...)`` keeps
+        an error inside the region from faulting the current run, so the
+        handler can catch it and, say, pause the print instead of failing
+        it. See ``Run.handled_errors`` for the rules, and docs/decisions.md.
+        Outside a managed run (a console command) it does nothing.
+        """
+        run, routine = self.get_bound_context()
+        if run is None or routine is None:
+            yield None
+            return
+        with run.handled_errors(routine.id):
+            yield routine
 
     def spawn_child_routine(self, run: Run, child_routine: Routine, child_tpl: Any, child_vars: dict):
         def _run_child(eventtime):
@@ -399,6 +429,8 @@ class GcoRoutinesManager:
         if run.fault:
             raise self.gcode.error("Run faulted before completion: %s" %
                                    run.fault)
+        if not satisfied:
+            self._raise_handled_failure(default_r)
 
     def finish_active_run(self):
         run = self.get_current_run()

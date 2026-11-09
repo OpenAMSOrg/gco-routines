@@ -102,6 +102,14 @@ class Routine:
     generation: int = 0
     # Why a running routine is suspended at a command boundary (e.g. "paused").
     suspended: Optional[str] = None
+    # Handled regions (decisions.md, 2026-11-08): the routine whose handled
+    # region started this one, while that region is open; whether a failed or
+    # cancelled routine was retired when its region closed (no bare WAIT or
+    # final join waits for it); and the failure a WAIT of this routine reports
+    # when a target failed inside a handled region.
+    handled_by: Optional[str] = None
+    retired: bool = False
+    dependency_error: Optional[str] = None
     _frames: Dict[Any, List[CommandFrame]] = field(default_factory=dict,
                                                     repr=False)
 
@@ -138,6 +146,8 @@ class Run:
         self.revision = 0
         self.fault: Optional[str] = None
         self.is_cancelled = False
+        # Open handled regions: owner routine id -> nesting depth.
+        self._handled_depth: Dict[str, int] = {}
         self.generation = 0
         # A persistent run spans source submissions (a virtual-SD print or
         # file input); transient runs are one API script or macro invocation.
@@ -286,6 +296,8 @@ class Run:
             raise ContractError("Routine retention limit exceeded")
         routine = self._new_routine(name, caller_id)
         routine.generation = self.generation
+        if self._handled_depth.get(caller_id):
+            routine.handled_by = caller_id
         self.revision += 1
         if runner is not None:
             self._schedule_routine(routine, runner)
@@ -365,7 +377,7 @@ class Run:
         caller = self.get_routine(caller_id)
         if names is None:
             return tuple(x.id for x in sorted(self.routines.values(), key=lambda x: x.order)
-                         if x.id not in (caller_id, self.default_id) and
+                         if x.id not in (caller_id, self.default_id) and not x.retired and
                          (x.state != "completed" or x.id not in caller.collected))
         names = list(names)
         if not names or len(set(names)) != len(names):
@@ -428,6 +440,7 @@ class Run:
         if r.state in ("completed", "failed", "cancelled") or self.fault is not None:
             return False
         if rid == self.default_id and any(x.id != rid and x.state != "completed"
+                                          and not x.retired
                                           for x in self.routines.values()):
             raise ContractError("Implicit final WAIT required before run completion")
         if result is None:
@@ -451,6 +464,14 @@ class Run:
         r = self.get_routine(rid)
         if r.state in ("completed", "failed", "cancelled"):
             return False
+        if self._handled_depth.get(rid):
+            # The owner of an open handled region: its own command's error
+            # reaches it as an ordinary error and does not fault the run.
+            return False
+        if r.handled_by is not None and self._handled_depth.get(r.handled_by):
+            # Started inside an open handled region: it fails alone.
+            self._end_alone(r, "failed", str(message))
+            return True
         self.fault = str(message)
         r.state, r.error, r.targets = "failed", self.fault, ()
         self._complete(r, False)
@@ -461,6 +482,80 @@ class Run:
         self.generation += 1
         self.revision += 1
         return True
+
+    def _end_alone(self, r: Routine, state: str, message: str) -> None:
+        """End one routine without faulting the run, and fail the WAIT of
+        every routine waiting on it with the reason."""
+        r.state, r.error, r.targets = state, message, ()
+        self._complete(r, False)
+        for waiter in self.routines.values():
+            if waiter.state == "waiting" and r.id in waiter.targets:
+                waiter.dependency_error = "Routine %s %s: %s" % (
+                    r.name or r.id, state, message)
+                waiter.state, waiter.targets = "running", ()
+                self._complete(waiter, False)
+        self.revision += 1
+
+    def is_handled(self, rid: str) -> bool:
+        """True while ``rid`` owns an open handled region, or was started
+        inside one that is still open."""
+        if self._handled_depth.get(rid):
+            return True
+        r = self.routines.get(rid)
+        return bool(r is not None and r.handled_by is not None
+                    and self._handled_depth.get(r.handled_by))
+
+    @contextmanager
+    def handled_errors(self, rid: str):
+        """A region whose errors the routine ``rid`` handles itself.
+
+        For a host component (an extra's command) that catches the errors of
+        the commands it runs, such as a toolchange that pauses the print
+        instead of failing it (decisions.md, 2026-11-08). Inside the region:
+
+        - an error raised by one of ``rid``'s own commands does not fault the
+          run; it reaches the region's owner as an ordinary error;
+        - a routine ``rid`` starts fails alone: no other routine is
+          cancelled, and the WAIT of a routine waiting on it fails with the
+          reason.
+
+        When an error leaves the region, the routines it started that are
+        still running or waiting are cancelled: an in-flight command finishes,
+        but no later command of theirs runs (a software cancel is not proof of
+        a physical stop). Either way, the region's failed and cancelled
+        routines are then retired, so neither a bare WAIT nor the run's
+        implicit final wait waits for them. A routine of the region still
+        running after a normal exit becomes an ordinary routine of the run.
+        An error the owner does not handle faults the run where gco-routines
+        next sees it, as without the region.
+        """
+        self.check_active(rid)
+        self._handled_depth[rid] = self._handled_depth.get(rid, 0) + 1
+        left_with_error = True
+        try:
+            yield
+            left_with_error = False
+        finally:
+            depth = self._handled_depth[rid] - 1
+            if depth:
+                self._handled_depth[rid] = depth
+            else:
+                del self._handled_depth[rid]
+                self._close_handled(rid, left_with_error)
+
+    def _close_handled(self, rid: str, cancel_unfinished: bool) -> None:
+        mine = [r for r in self.routines.values() if r.handled_by == rid]
+        if cancel_unfinished:
+            for r in mine:
+                if r.state in ("running", "waiting"):
+                    self._end_alone(
+                        r, "cancelled",
+                        "cancelled with the handled region of %s" % rid)
+        for r in mine:
+            if r.state in ("failed", "cancelled"):
+                r.retired = True
+            r.handled_by = None
+        self.revision += 1
 
     def cancel_run(self, message: str = "Run cancelled") -> None:
         self.fault = str(message)

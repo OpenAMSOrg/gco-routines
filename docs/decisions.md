@@ -59,3 +59,42 @@ G-code syntax and do not make the slicer evaluate printer state to validate a bl
   PAUSE could take the mutex and spin in `do_pause()` waiting for a worker
   that was waiting for children queued behind that PAUSE (and an API cancel
   deadlocked the same way through `on_error_gcode`).
+
+## Design addition: handled regions (2026-11-08)
+
+Problem, found on a printer: OpenAMS turns a failed toolchange in a print into a
+pause, so the owner can fix the cause and press RESUME. It catches the error in
+its own command (`OAMSM_TOOLCHANGE`). Under gco-routines that could not work: the
+dispatcher faults the run at the innermost line that raises, even when an outer
+handler catches the error, so the handler's own `PAUSE` then raised "Run is
+faulted" and Klipper ended the print through `on_error_gcode`.
+
+Addition: `GcoRoutinesManager.handled_errors()`, a region opened by another
+extra's command around the commands it runs (`Run.handled_errors(rid)` in the
+runtime). The behavioral spec already limits the immediate run fault to an
+*unrecoverable* routine error; a handled region is how a host component declares
+the errors it recovers from itself. Inside it:
+
+- an error raised by one of the owner's own commands does not fault the run; it
+  reaches the owner as an ordinary `gcode.error`;
+- a routine the owner starts fails alone: no other routine is cancelled, and the
+  WAIT of a routine waiting on it raises with the reason.
+
+When an error leaves the region, the routines it started that are still running
+or waiting are cancelled: an in-flight command finishes, no later command of
+theirs runs. Either way, the region's failed and cancelled routines are then
+retired, so neither a bare WAIT nor the run's implicit final wait waits for them.
+A routine of the region still running after a normal exit becomes an ordinary
+routine of the run. An error the owner does not handle faults the run where
+gco-routines next sees it, exactly as without the region; outside a managed run
+(a console command) the region does nothing.
+
+Invariant 10 holds: no command following a failed dependency reaches the
+printer. A failed routine's dependents are its waiters, whose WAIT raises; the
+region cancels the region's unfinished routines when an error leaves it; and the
+owner is responsible for what the run does next (OpenAMS pauses the print, and
+its RESUME finishes the toolchange before the file continues). The status schema
+is unchanged: a routine that failed alone shows `failed` with its `error`, and the
+run's `fault` stays null. Tests: `tests/test_handled_errors.py` (runtime) and
+`tests/integration/test_handled_errors_print.py` (a real virtual-SD print).
+The state machine is drawn in `docs/images/routine-states.svg`.

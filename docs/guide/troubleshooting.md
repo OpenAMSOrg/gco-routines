@@ -64,6 +64,8 @@ Read the log with `tail -n 50 ~/printer_data/logs/klippy.log` (your path may dif
 | `Dependency did not succeed` | A routine you waited on failed | Read its `error` in the `gco_routines` status |
 | `Macro NAME called recursively within routine ID` | A macro calls itself in one routine | Break the recursion |
 | `Run faulted: ...` or `Run faulted before completion: ...` | A routine's command failed | Fix the cause in the quoted text; the run cannot issue more commands |
+| `Routine NAME failed: ...` from a `WAIT` | A routine started inside another extra's handled region failed alone; the extra handles it (OpenAMS pauses the print) | Follow that extra's message; for OpenAMS, fix the cause and press RESUME |
+| A failed OpenAMS toolchange ends the print instead of pausing it | gco-routines without handled regions, or OpenAMS older than `OAMSM_TOOLCHANGE` | Update both; see [openams.md](openams.md#when-a-toolchange-fails) |
 | `Cannot dispatch command: run is cancelled or faulted` | Work continued after a cancel or fault | Start a new job |
 | `Virtual SD path escapes configured root` | A file path leaves the virtual SD folder | Use a path inside it |
 

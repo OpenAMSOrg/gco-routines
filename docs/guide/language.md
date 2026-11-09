@@ -111,6 +111,25 @@ dispatches anything. The bundled
 | `{% call %}` or `{% filter %}` blocks | No, in ordered macros |
 | A Jinja statement and a G-code line on the same line | No, in ordered macros |
 
+### When a command fails
+
+![A routine's states, the run fault, and handled regions](../images/routine-states.svg)
+
+A routine is `running`, `waiting` (in `WAIT`, or suspended at a command boundary
+while the printer is paused), then `completed`, `failed` or `cancelled`.
+
+**A command that raises faults the whole run.** Every other routine is
+cancelled, every later command raises `Run is faulted: ...`, and in a print
+Klipper runs `on_error_gcode`, which usually cancels the print. A routine's
+`WAIT` on a failed routine fails too.
+
+**Unless another extra handles that error itself.** An extra's command can run
+its commands in a *handled region*. Then an error in them reaches that command
+instead of faulting the run, and a routine it started fails alone. OpenAMS does
+this for toolchanges: a failure pauses the print, and `RESUME` finishes the
+toolchange ([openams.md](openams.md#when-a-toolchange-fails)). An error the
+extra does not handle still faults the run.
+
 ## Check that it works
 
 See the probe macro in [install.md](install.md#check-that-it-works).
