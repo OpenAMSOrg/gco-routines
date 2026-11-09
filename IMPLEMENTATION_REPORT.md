@@ -249,6 +249,23 @@ change to the grammar, the status schema or any upstream file.
 .venv/bin/python -m pytest -q                                                   # 410 passed in 37.44s
 ```
 
+### Legacy rendering in recovery (2026-11-08)
+
+Found on voron350 with gco-routines on: OpenAMS's RESUME could not retry a
+toolchange that had to feed again, because RESUME refused `_TX` at entry
+("Recovery macros cannot start managed routines"). Design: docs/decisions.md,
+"Design addition: legacy rendering in recovery".
+
+Changes: `IntegrationAdapter.legacy_in_recovery()` / `_legacy_in_recovery()`
+(per greenlet) and the recovery check in the macro wrapper in
+`integration.py`; `GcoRoutinesManager.legacy_in_recovery()` in `__init__.py`.
+No change to the grammar, the status schema or any upstream file.
+
+```bash
+.venv/bin/python -m pytest -q tests/integration/test_handled_errors_print.py    # 10 passed
+.venv/bin/python -m pytest -q                                                   # 414 passed in 37.50s
+```
+
 The integration cases run a real virtual-SD print whose host command runs an
 ordered macro (background feed, cleaning, WAIT, reload) under the region: a
 failure of the feed, the cleaning or the reload pauses the print and RESUME

@@ -54,7 +54,8 @@ Read the log with `tail -n 50 ~/printer_data/logs/klippy.log` (your path may dif
 | `E_GENERATED_CONTROL: legacy/internal rendering may not generate START, END, or WAIT; macros using literal controls must declare render_mode: ordered` | A legacy macro contains or emits a control | Add `render_mode: ordered` to that macro |
 | `gco-routines requires a complete file/API source; pseudo-TTY or generated control input is unsupported` | A control typed alone into a terminal or console | Put the controls in an ordered macro or a file |
 | `E_TRANSPORT: decode transport framing before using gco-routines controls` | Line-numbered, checksummed input (`N12 START`) | Send unframed G-code |
-| `Recovery scripts cannot start managed routines` (or `Recovery macros ...`) | A pause, cancel or error handler tries to use `START` | Keep recovery macros free of controls |
+| `Recovery scripts cannot start managed routines` (or `Recovery macros ...`) | A pause, cancel or error handler tries to use `START`, or calls an ordered macro | Keep recovery macros free of controls; an extra whose ordered macro has a paused path without controls runs it in `legacy_in_recovery()` |
+| OpenAMS: `could not finish the toolchange ... Recovery macros cannot start managed routines` on RESUME | gco-routines older than `legacy_in_recovery()` | Update gco-routines |
 | `Routine admission is paused` | `START` while the printer is paused | Resume first |
 | `Nested spawning is not permitted in v0.2; macro NAME owns background routines` | A macro with its own routines is called inside a routine | Call it from the default routine |
 | `Nested spawning is not permitted in v0.2` | `START` inside a routine | Restructure into flat routines |

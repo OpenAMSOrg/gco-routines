@@ -98,3 +98,23 @@ is unchanged: a routine that failed alone shows `failed` with its `error`, and t
 run's `fault` stays null. Tests: `tests/test_handled_errors.py` (runtime) and
 `tests/integration/test_handled_errors_print.py` (a real virtual-SD print).
 The state machine is drawn in `docs/images/routine-states.svg`.
+
+## Design addition: legacy rendering in recovery (2026-11-08)
+
+Problem, found on the same printer the same evening: OpenAMS's RESUME retries a
+failed toolchange by running its toolchange macro (`_TX`, an ordered macro) again
+before the print continues. RESUME is a recovery handler, and a recovery handler
+refuses every ordered macro at entry ("Recovery macros cannot start managed
+routines"), so a retry that had to feed again could not run.
+
+A recovery handler still starts no routines. `_TX` starts none while the printer
+is paused: it takes its serial branch, the same one it takes without
+gco-routines. Addition: `GcoRoutinesManager.legacy_in_recovery()`, a region its
+caller opens (per greenlet, like the recovery context itself). Inside a recovery
+handler, an ordered macro called inside the region renders all at once like a
+legacy macro instead of being refused, and a control in its rendered output is
+still refused, before any of its commands runs (the existing check of recovery
+scripts). Outside a recovery handler the region changes nothing. It is opt-in at
+the call site because rendering all at once is a different evaluation from
+ordered rendering: only a caller that knows its macro's paused branch should ask
+for it. Tests: four cases in `tests/integration/test_handled_errors_print.py`.

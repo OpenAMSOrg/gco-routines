@@ -130,6 +130,12 @@ this for toolchanges: a failure pauses the print, and `RESUME` finishes the
 toolchange ([openams.md](openams.md#when-a-toolchange-fails)). An error the
 extra does not handle still faults the run.
 
+**Pause, resume and cancel start no routines.** An ordered macro called from
+`PAUSE`, `RESUME`, `CLEAR_PAUSE` or `CANCEL_PRINT` is refused. An extra that
+knows its macro takes a path without controls while paused can run it there in
+a `legacy_in_recovery()` region: it then renders like a legacy macro. OpenAMS
+does this when RESUME retries a toolchange.
+
 ## Check that it works
 
 See the probe macro in [install.md](install.md#check-that-it-works).

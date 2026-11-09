@@ -227,6 +227,10 @@ author.
   own commands reaches it instead of faulting the run, and a routine it starts
   fails alone. An error it does not handle faults the run as usual. See
   `docs/decisions.md` (2026-11-08) and `docs/images/routine-states.svg`.
+- Pause, resume and cancel handlers start no routines and refuse ordered
+  macros. A caller that knows its ordered macro takes a path without controls
+  while paused runs it in `legacy_in_recovery()`, where it renders like a
+  legacy macro (a control in its output is still refused).
 
 ## Single-FPS OpenAMS macros
 

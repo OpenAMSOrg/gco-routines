@@ -360,6 +360,7 @@ class IntegrationAdapter:
         self.installed = False
         self._source_modes = {}
         self._recovery_depth = {}
+        self._legacy_depth = {}
         self._sd_sources: Dict[Tuple[Any, Any], _SourceState] = {}
         self._wrapped_handlers = set()
         self._orig_process_commands = None
@@ -497,6 +498,20 @@ class IntegrationAdapter:
 
     def _in_recovery(self):
         return bool(self._recovery_depth.get(greenlet.getcurrent()))
+
+    @contextmanager
+    def legacy_in_recovery(self):
+        key = greenlet.getcurrent()
+        self._legacy_depth[key] = self._legacy_depth.get(key, 0) + 1
+        try:
+            yield
+        finally:
+            self._legacy_depth[key] -= 1
+            if not self._legacy_depth[key]:
+                del self._legacy_depth[key]
+
+    def _legacy_in_recovery(self):
+        return bool(self._legacy_depth.get(greenlet.getcurrent()))
 
     def _push_mode(self, mode):
         key = greenlet.getcurrent()
@@ -1003,7 +1018,12 @@ class IntegrationAdapter:
             manager = obj.printer.lookup_object("gco_routines", None)
             runner = getattr(getattr(obj, "template", None), "gco_runner", None)
             if manager is not None and manager.adapter._in_recovery():
-                if runner is not None:
+                # A recovery handler starts no routines, so an ordered macro
+                # is refused there; inside its caller's legacy_in_recovery()
+                # it renders all at once like a legacy macro instead, and a
+                # control in its output is still refused (by
+                # _process_managed_commands) before any of it runs.
+                if runner is not None and not manager.adapter._legacy_in_recovery():
                     raise manager.gcode.error("Recovery macros cannot start managed routines")
                 return original_cmd(obj, gcmd)
             if manager is None or (runner is None and

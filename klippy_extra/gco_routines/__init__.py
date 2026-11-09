@@ -358,6 +358,22 @@ class GcoRoutinesManager:
         with run.handled_errors(routine.id):
             yield routine
 
+    @contextmanager
+    def legacy_in_recovery(self):
+        """Let a recovery handler run an ordered macro as a legacy one.
+
+        PAUSE, RESUME, CLEAR_PAUSE and CANCEL_PRINT start no routines, so an
+        ordered macro called from them is refused ("Recovery macros cannot
+        start managed routines"). A host component whose ordered macro takes
+        a path without controls while the printer is paused (OpenAMS's _TX,
+        retried from RESUME) calls it inside this region: the macro then
+        renders all at once, as it does without gco-routines, and a control
+        in its rendered output is still refused before any of it runs.
+        Outside a recovery handler the region changes nothing.
+        """
+        with self.adapter.legacy_in_recovery():
+            yield
+
     def spawn_child_routine(self, run: Run, child_routine: Routine, child_tpl: Any, child_vars: dict):
         def _run_child(eventtime):
             if run.fault is not None or child_routine.state != "running":

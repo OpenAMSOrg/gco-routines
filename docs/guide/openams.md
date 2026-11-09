@@ -87,6 +87,9 @@ overlaps it, reaches `OAMSM_TOOLCHANGE` instead of faulting the run.
 toolchange started, and runs `PAUSE`; the print waits. Fix the cause and press
 **RESUME**: OpenAMS clears the AMS's faults, works out where the lane is, runs
 only what is left, and the file continues. If that fails, the print stays paused.
+The retry runs inside RESUME, where gco-routines starts no routines, so OpenAMS
+opens a `legacy_in_recovery()` region and `_TX` takes its serial path there: the
+retry feeds without the overlap, then cleans the nozzle.
 
 ![A routine's states, the run fault, and handled regions](../images/routine-states.svg)
 
@@ -95,8 +98,9 @@ reports the failure. If the cleaning fails while the load still runs, the region
 cancels the load's routine: the AMS finishes the load it was given, and nothing
 after it runs. OpenAMS's RESUME then sees what the AMS actually did.
 
-This needs both sides: gco-routines with handled regions (this version) and an
-OpenAMS with `OAMSM_TOOLCHANGE` (2026-11-08 or later). With an older
+This needs both sides: gco-routines with handled regions and
+`legacy_in_recovery()` (this version) and an OpenAMS with `OAMSM_TOOLCHANGE`
+(2026-11-08 or later). With an older
 gco-routines, OpenAMS cannot keep the run alive, and a failed toolchange ends the
 print as before. The whole OpenAMS sequence is drawn in its guide's
 [How the macros run](https://github.com/OpenAMSOrg/openams/blob/main/docs/guide/macro-sequence.md).
