@@ -98,6 +98,44 @@ def test_virtual_sd_preflight_rejects_unclosed_block_before_open(klippy_env, tmp
     assert vsd.current_file is None
 
 
+def test_print_file_preflight_yields_and_is_not_repeated(klippy_env, tmp_path,
+                                                         monkeypatch):
+    """SDCARD_PRINT_FILE runs on Klipper's reactor: preflight must let it run
+    between steps (the 2026-11-13 stall held it 4.4 s and the AMS units'
+    host watchdogs fired), and printing the same unchanged file again must
+    not scan it again."""
+    import gco_routines.integration as integration
+    path = tmp_path / "big.gcode"
+    path.write_text("G1 X1 Y2 E0.1\n" * 200000)          # about 2.8 MB
+    vsd = _virtual_sd(klippy_env, tmp_path)
+    pauses = []
+    adapter = klippy_env.manager.adapter
+    monkeypatch.setattr(adapter, "_preflight_pause",
+                        lambda: (lambda: pauses.append(1)))
+    scans = []
+    real = integration.preflight_file
+
+    def counting(path, **kwargs):
+        scans.append(path)
+        return real(path, **kwargs)
+    monkeypatch.setattr(integration, "preflight_file", counting)
+    vsd.cmd_SDCARD_PRINT_FILE(_LoadCommand("big.gcode"))
+    assert len(scans) == 1 and len(pauses) >= 2
+    vsd._reset_file()
+    vsd.cmd_SDCARD_PRINT_FILE(_LoadCommand("big.gcode"))
+    assert len(scans) == 1                                 # remembered
+    path.write_text("START NAME=a\nG1 X1\n")              # changed: unclosed
+    with pytest.raises(klippy_env.gcode.error, match="E_UNCLOSED_START"):
+        vsd._reset_file()
+        vsd.cmd_SDCARD_PRINT_FILE(_LoadCommand("big.gcode"))
+
+
+def test_the_default_preflight_pause_yields_to_the_reactor(klippy_env):
+    pause = klippy_env.manager.adapter._preflight_pause()
+    assert callable(pause)
+    pause()                      # the reactor is not running: a system pause
+
+
 def test_pause_blocks_new_routines_until_resume(klippy_env):
     class Pause:
         def cmd_PAUSE(self, gcmd):

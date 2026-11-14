@@ -801,6 +801,41 @@ class IntegrationAdapter:
                              str(exc) or type(exc).__name__)
             raise
 
+    #: How many validated files preflight remembers (by path, size and
+    #: modification time), so printing a file again does not scan it again.
+    PREFLIGHT_MEMORY = 16
+
+    def _preflight(self, path):
+        """Preflight a virtual-SD file without holding Klipper's reactor.
+
+        The scan yields to the reactor between steps (preflight_file's
+        ``pause``), so the other MCUs' keepalives, timers and requests keep
+        running however large the file; a file validated before and not
+        changed since is not scanned again."""
+        try:
+            stat = os.stat(path)
+            key = (path, stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            key = None
+        memory = self.__dict__.setdefault("_preflight_ok", {})
+        if key is not None and key in memory:
+            return
+        preflight_file(path, pause=self._preflight_pause())
+        if key is not None:
+            if len(memory) >= self.PREFLIGHT_MEMORY:
+                memory.pop(next(iter(memory)))
+            memory[key] = True
+
+    def _preflight_pause(self):
+        """A callable that lets the reactor run once, or None without one."""
+        get_reactor = getattr(self.printer, "get_reactor", None)
+        reactor = get_reactor() if callable(get_reactor) else None
+        pause = getattr(reactor, "pause", None)
+        monotonic = getattr(reactor, "monotonic", None)
+        if not callable(pause) or not callable(monotonic):
+            return None
+        return lambda: pause(monotonic())
+
     def _hook_virtual_sdcard(self, vsd):
         if vsd is None or id(vsd) in self._hooked_vsd:
             return
@@ -811,11 +846,14 @@ class IntegrationAdapter:
             return
 
         def resolve_preflight(filename, check_subdirs):
-            files = vsd.get_file_list(check_subdirs)
-            by_lower = {name.lower(): name for name, _size in files}
             selected = filename
-            if selected not in by_lower.values():
-                selected = by_lower.get(selected.lower(), selected)
+            # The exact name needs no directory walk (Klipper's own load
+            # walks once more); only another case does.
+            if not os.path.isfile(os.path.join(vsd.sdcard_dirname, selected)):
+                files = vsd.get_file_list(check_subdirs)
+                by_lower = {name.lower(): name for name, _size in files}
+                if selected not in by_lower.values():
+                    selected = by_lower.get(selected.lower(), selected)
             path = os.path.realpath(os.path.join(vsd.sdcard_dirname, selected))
             root = os.path.realpath(vsd.sdcard_dirname)
             try:
@@ -824,7 +862,7 @@ class IntegrationAdapter:
                 inside = False
             if not inside:
                 raise self.gcode.error("Virtual SD path escapes configured root")
-            preflight_file(path)
+            self._preflight(path)
 
         @functools.wraps(original)
         def load_file(gcmd, filename, check_subdirs=False):

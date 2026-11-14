@@ -53,6 +53,18 @@ G-code syntax and do not make the slicer evaluate printer state to validate a bl
   `BlockCollector` without retaining ordinary lines; per-block limits and all
   structural errors are unchanged, plus a 16 Mi-character physical-line sanity
   bound. `parse_program` remains the parser for (small) complete API scripts.
+- Virtual-SD preflight never holds Klipper's reactor (2026-11-13). Streaming
+  every line through Python took 4.4 s on a Raspberry Pi for a 2.5-million-line
+  OrcaSlicer file, inside SDCARD_PRINT_FILE on the reactor: no timer ran, the
+  host keepalives to the printer's other MCUs stopped, and the AMS units'
+  4 s host watchdogs fired at print start. A fast pass over the raw bytes
+  (C-speed searches for a line that could be START, END, WAIT or transport
+  framing, and for an overlong line) now settles a file with no control line
+  without parsing it, about 7x faster; a file it cannot settle goes through
+  the unchanged line-by-line pass. Both passes yield to the reactor between
+  steps (1 MiB, or 20,000 lines), and a file validated before and unchanged
+  (path, size, modification time) is not scanned again. The yields are
+  cooperative reactor pauses, not threads.
 - The implicit end-of-file join is an SD command, like an explicit final
   WAIT line: it holds the G-code mutex and sets the virtual-SD `cmd_from_sd`
   flag through its error cleanup. Previously it ran outside the mutex, so a

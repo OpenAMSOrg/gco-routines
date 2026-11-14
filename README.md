@@ -181,7 +181,9 @@ Jinja `default` filter is used explicitly.
   `M23`/`M24` and `SDCARD_PRINT_FILE`, and performs an implicit join before EOF
   can be reported as successful. Preflight streams the file with bounded
   memory; there is no file-size limit (each `START` block is limited to
-  100,000 lines / 2 MB). The implicit join behaves like an explicit final
+  100,000 lines / 2 MB). It yields to Klipper's reactor between steps, and a
+  file with no control line is settled by a fast byte scan, so a large file
+  never stalls the printer's timers. The implicit join behaves like an explicit final
   `WAIT` line: console/API `PAUSE` and console `CANCEL_PRINT` queue until it
   finishes (the print then completes), while the API cancel endpoint used by
   Moonraker and shutdown cancel it immediately.

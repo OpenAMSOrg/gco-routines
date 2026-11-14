@@ -8,7 +8,7 @@ layer decides when a completed :class:`Block` is admitted to a :class:`Run`.
 from dataclasses import dataclass, field
 import os
 import sys
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import re
 
@@ -222,18 +222,95 @@ def _may_be_control(line: str) -> bool:
     return bool(stripped) and stripped[0] in _CONTROL_INITIALS
 
 
+# How much of the file one preflight step reads before it lets the reactor
+# run (Klipper's timers, the host keepalives of other MCUs): small enough that
+# no step blocks for long on a slow host, large enough to stay cheap.
+PREFLIGHT_CHUNK_BYTES = 1 << 20
+# The exact (line by line) pass yields this often.
+PREFLIGHT_YIELD_LINES = 20000
+
+# A line the exact pass could treat as a control (_control: START, END or
+# WAIT as the head after spaces and tabs, or transport framing N<digits>
+# before one), matched on lowercased bytes at a line start. A superset is
+# safe: a match only sends the file through the exact pass.
+_CANDIDATE = re.compile(
+    rb"[ \t]*(?:n[0-9]+[ \t\x0b\x0c]*)?(?:start|end|wait)(?![a-z0-9_])")
+# Where such a line can begin: a line end followed by a keyword, a space or
+# tab, or transport framing. One regex pass with a literal first character
+# finds them at C speed; each hit is then checked against _CANDIDATE.
+_LINE_START = re.compile(rb"\n(?:[ \t]|n[0-9]|start|end|wait)")
+
+
+def _chunk_has_candidate(piece: bytes) -> bool:
+    """Whether whole lines ``piece`` (ending at a line end) hold a line the
+    exact pass could treat as a control."""
+    low = piece.lower()
+    if b"\r" in low:            # universal newlines, as the exact pass reads
+        low = low.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    low = b"\n" + low
+    for hit in _LINE_START.finditer(low):
+        if _CANDIDATE.match(low, hit.start() + 1):
+            return True
+    return False
+
+
+def _may_hold_control(filepath: str, max_line_chars: int,
+                      pause: Optional[Callable[[], None]]) -> bool:
+    """A fast pass over the raw bytes: False only when the exact pass could
+    find no control line and no overlong line, so it would accept the file
+    without collecting anything. Searching in C instead of a Python loop per
+    line makes a 2.5-million-line slicer file a fraction of a second instead
+    of seconds. Line lengths are measured in bytes, never fewer than the
+    exact pass's characters, so a doubtful line goes to the exact pass."""
+    # A line wholly inside one read can exceed only a limit below the read.
+    long_line = (re.compile(rb"[^\r\n]{%d}" % (max_line_chars + 1))
+                 if max_line_chars < PREFLIGHT_CHUNK_BYTES else None)
+    carry = b""
+    with open(filepath, "rb") as source_file:
+        while True:
+            data = source_file.read(PREFLIGHT_CHUNK_BYTES)
+            if not data:
+                break
+            ends = [i for i in (data.find(b"\n"), data.find(b"\r")) if i != -1]
+            if not ends:
+                carry += data
+                if len(carry) > max_line_chars:
+                    return True
+            else:
+                if len(carry) + min(ends) > max_line_chars:
+                    return True      # the line the last read left open
+                cut = max(data.rfind(b"\n"), data.rfind(b"\r"))
+                piece, carry = carry + data[:cut + 1], data[cut + 1:]
+                if long_line is not None and long_line.search(piece):
+                    return True
+                if _chunk_has_candidate(piece) or len(carry) > max_line_chars:
+                    return True
+            if pause is not None:
+                pause()
+    return bool(carry) and _chunk_has_candidate(carry + b"\n")
+
+
 def preflight_file(filepath: str,
-                   max_line_chars: int = MAX_PREFLIGHT_LINE_CHARS) -> None:
+                   max_line_chars: int = MAX_PREFLIGHT_LINE_CHARS,
+                   pause: Optional[Callable[[], None]] = None) -> None:
     """Validate a complete file's control structure before admission.
 
-    The file is streamed line by line through a :class:`BlockCollector`.
+    A fast pass over the raw bytes settles the common case, a sliced file
+    with no START, END or WAIT line, without parsing a line. Otherwise the
+    file is streamed line by line through a :class:`BlockCollector`.
     Ordinary lines outside a block are neither retained nor fully parsed, so
     memory is bounded by the collector's per-block limits and one line,
     whatever the file size.  Line splitting matches :func:`parse_program`
     (universal newlines).  Nothing is rendered or dispatched.
+
+    ``pause``, when given, is called between steps so a caller on Klipper's
+    reactor can let it run: preflight then never holds the reactor for long,
+    whatever the file size.
     """
     if not os.path.exists(filepath):
         raise ProgramError("Source file does not exist: %s" % filepath)
+    if not _may_hold_control(filepath, max_line_chars, pause):
+        return
     collector = BlockCollector(source_id=filepath)
     with open(filepath, "r", encoding="utf-8", errors="replace") as source_file:
         line_num = 0
@@ -250,4 +327,6 @@ def preflight_file(filepath: str,
                     % (line_num, max_line_chars))
             if collector.collecting or _may_be_control(line):
                 collector.feed_line(line, line_num)
+            if pause is not None and line_num % PREFLIGHT_YIELD_LINES == 0:
+                pause()
     collector.assert_closed()
